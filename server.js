@@ -30,6 +30,7 @@ app.use('/api/v1/customer',  require('./routes/CustomerRoutes'));
 app.use('/api/v1/product',   require('./routes/ProductRoutes')); 
 app.use('/api/v1/inventory', require('./routes/InventoryItemRoutes'));
 app.use('/api/v1/material',  require('./routes/RawMaterialRoutes'));
+app.use('/api/v1/order',     require('./routes/OrderRoutes')); // Added order routes
 
 // ─────────────────────────────────────────
 // 404 HANDLER
