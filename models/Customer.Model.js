@@ -39,6 +39,32 @@ const customerSchema = new mongoose.Schema({
         type: String,
         required: true  // Store only hashed passwords (e.g. bcrypt) — never plain text
     },
+    templateDesigns: [
+        {
+            logoImageUrl: {
+                type: String,
+                required: true,
+            },
+            printSize: {
+                type: String,
+                required: true,
+            },
+            placement: {
+                type: String,
+                required: true,
+            },
+            notes: {
+                type: String,
+                trim: true
+            },
+        },
+    ],
+    orders: [
+        {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Order'
+        }
+    ],  
     createdAt: {
         type: Date,
         default: Date.now,  // Real Date object, not a string
