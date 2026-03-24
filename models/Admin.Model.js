@@ -59,23 +59,5 @@ const adminSchema = new mongoose.Schema({
     }
 });
 
-// Auto-update updatedAt on every save
-adminSchema.pre('save', function (next) {
-    this.updatedAt = new Date();
-    next();
-});
-
-// Full name virtual
-adminSchema.virtual('fullName').get(function () {
-    const middle = this.middleName ? ` ${this.middleName} ` : ' ';
-    return `${this.firstName}${middle}${this.lastName}`;
-});
-
-// Instance method: record login timestamp
-adminSchema.methods.recordLogin = async function () {
-    this.lastLogin = new Date();
-    await this.save();
-};
-
 const Admin = mongoose.model('Admin', adminSchema);
 module.exports = Admin;

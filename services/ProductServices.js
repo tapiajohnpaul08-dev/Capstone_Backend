@@ -1,4 +1,4 @@
-const Product = require('../models/Product_Model');
+const Product = require('../models/Product.Model');
 const generateId = require('../utils/generateId');
 
 class ProductService {

@@ -1,4 +1,4 @@
-const RawMaterial = require('../models/RawMaterial_Model');
+const RawMaterial = require('../models/RawMaterial.Model');
 const generateId = require('../utils/generateId');
 
 class RawMaterialService {

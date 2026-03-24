@@ -1,4 +1,4 @@
-const Customer = require('../models/Customer_Model');
+const Customer = require('../models/Customer.Model');
 const generateId = require('../utils/generateId');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
