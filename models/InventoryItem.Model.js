@@ -4,17 +4,23 @@ const mongoose = require('mongoose');
 const inventoryItemSchema = new mongoose.Schema({
     inventoryId: { type: String, required: true, unique: true },
     
-    // Polymorphic reference - can be either Product or RawMaterial
+    // For products - matches your database field
+    product: { 
+        type: mongoose.Schema.Types.ObjectId, 
+        ref: 'Product',
+        required: false 
+    },
+    
+    // For raw materials
     itemType: { 
         type: String, 
-        required: true, 
-        enum: ['Product', 'RawMaterial'],
-        default: 'Product'
+        enum: ['RawMaterial'],
+        required: false 
     },
-    material: { 
+    item: { 
         type: mongoose.Schema.Types.ObjectId, 
-        refPath: 'itemType',  // Dynamic reference based on itemType
-        required: true 
+        ref: 'RawMaterial',
+        required: false 
     },
     
     // For products only
@@ -28,27 +34,23 @@ const inventoryItemSchema = new mongoose.Schema({
     // Additional metadata
     notes: { type: String },
     lastRestocked: { type: Date },
-    location: { type: String } // Optional: warehouse location
+    location: { type: String }
 }, { timestamps: true });
 
-// Compound index to prevent duplicates for products with size
-inventoryItemSchema.index({ item: 1, itemType: 1, sizeLabel: 1 }, { 
+// Update indexes to match your actual data structure
+// Index for products (using 'product' field)
+inventoryItemSchema.index({ product: 1, sizeLabel: 1 }, { 
     unique: true,
     partialFilterExpression: { sizeLabel: { $exists: true } }
 });
 
-// Index for raw materials (no size label)
+// Index for raw materials (using 'item' field)
 inventoryItemSchema.index({ item: 1, itemType: 1 }, { 
     unique: true,
     partialFilterExpression: { sizeLabel: { $exists: false } }
 });
 
-// Virtual for getting the actual item details
-inventoryItemSchema.virtual('itemDetails', {
-    refPath: 'itemType',
-    localField: 'item',
-    foreignField: '_id',
-    justOne: true
-});
+// Index for inventoryId
+inventoryItemSchema.index({ inventoryId: 1 }, { unique: true });
 
 module.exports = mongoose.model('InventoryItem', inventoryItemSchema);

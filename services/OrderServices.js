@@ -2,102 +2,78 @@
 const Order = require('../models/Order.Model');
 const InventoryItem = require('../models/InventoryItem.Model');
 const Product = require('../models/Product.Model');
-const Admin = require('../models/Admin.Model');
-const Customer = require('../models/Customer.Model');
 const generateId = require('../utils/generateId');
 
 class OrderService {
     
-    // services/OrderService.js (updated createOrder method)
 
 async createOrder(payload, user = null, userType = null) {
     try {
-        // Validate product exists
+        console.log('\n=== 🔵 CREATE ORDER STARTED ===');
+        
+        // Find product
         const product = await Product.findOne({ productId: payload.productId });
         if (!product) {
             return { success: false, message: 'Product not found' };
         }
 
-        // Validate size exists on product (case-insensitive)
+        // Validate size
         const sizeExists = product.sizes.some(
             s => s.label.toLowerCase() === payload.size.toLowerCase()
         );
         if (!sizeExists) {
             return {
                 success: false,
-                message: `Size "${payload.size}" does not exist for this product. Available sizes: ${product.sizes.map(s => s.label).join(', ')}`
+                message: `Size "${payload.size}" does not exist. Available: ${product.sizes.map(s => s.label).join(', ')}`
             };
         }
 
-        const prId = product._id.toString();
-
-        // Find inventory with case-insensitive size label
+        // Find inventory - using 'product' field (matches your database)
         const inventory = await InventoryItem.findOne({
-            item: prId,
-            sizeLabel: { $regex: new RegExp(`^${payload.size}$`, 'i') } // Case-insensitive match
+            product: product._id,
+            sizeLabel: { $regex: new RegExp(`^${payload.size}$`, 'i') }
         });
 
         if (!inventory) {
-            // Get all available inventory for this product to help debug
-            const availableInventory = await InventoryItem.find({ item: prId });
-            const availableSizes = availableInventory.map(inv => inv.sizeLabel);
-            
             return {
                 success: false,
-                message: `Inventory not found for ${product.name} - ${payload.size}. Available sizes: ${availableSizes.join(', ') || 'None'}`
+                message: `Inventory not found for ${product.name} - ${payload.size}`
             };
         }
 
         if (inventory.stock < payload.quantity) {
             return {
                 success: false,
-                message: `Insufficient stock for ${product.name} - ${payload.size}. Available: ${inventory.stock}, Requested: ${payload.quantity}`
+                message: `Insufficient stock. Available: ${inventory.stock}, Requested: ${payload.quantity}`
             };
         }
 
         // Deduct stock
+        const previousStock = inventory.stock;
         inventory.stock -= payload.quantity;
         await inventory.save();
 
-        // Determine orderedBy based on who is creating the order
+        // Determine who placed the order
         let orderedById;
-        let orderedByModel;
         let customerEmail = payload.customerEmail;
         let customerName = payload.customerName;
 
         if (user && userType === 'customer') {
-            // Customer creating their own order
-            orderedById = user._id;
-            orderedByModel = 'Customer';
+            orderedById = user._id.toString();
             customerEmail = user.email;
             customerName = user.name;
         } else if (user && userType === 'admin') {
-            // Admin creating order for a customer
-            orderedById = user._id;
-            orderedByModel = 'Admin';
-            
-            // Customer email must be provided by admin
+            orderedById = user._id.toString();
             if (!payload.customerEmail) {
                 return {
                     success: false,
                     message: 'Customer email is required when creating order as admin'
                 };
             }
-            
-            // Verify customer exists
-            const Customer = require('../models/Customer.Model');
-            const customer = await Customer.findOne({ email: payload.customerEmail });
-            if (!customer) {
-                return {
-                    success: false,
-                    message: `Customer not found with email: ${payload.customerEmail}`
-                };
-            }
-            customerName = customer.name;
         } else {
             return {
                 success: false,
-                message: 'Invalid user type for order creation. Must be "customer" or "admin"'
+                message: 'Invalid user type'
             };
         }
 
@@ -122,15 +98,11 @@ async createOrder(payload, user = null, userType = null) {
                 status: payload.status || 'Pending',
                 timestamp: new Date(),
                 notes: payload.notes || 'Order created',
-                updatedBy: orderedById,
-                updatedByModel: orderedByModel
+                updatedBy: orderedById
             }]
         });
 
         await newOrder.save();
-        
-        // Populate the orderedBy details
-        await newOrder.populate('orderedBy');
 
         return {
             success: true,
@@ -138,9 +110,12 @@ async createOrder(payload, user = null, userType = null) {
             data: {
                 ...newOrder.toObject(),
                 inventoryDetails: {
-                    previousStock: inventory.stock + payload.quantity,
+                    productName: product.name,
+                    size: inventory.sizeLabel,
+                    previousStock: previousStock,
                     newStock: inventory.stock,
-                    deducted: payload.quantity
+                    deducted: payload.quantity,
+                    inventoryId: inventory.inventoryId
                 }
             }
         };
@@ -152,117 +127,9 @@ async createOrder(payload, user = null, userType = null) {
 }
 
     // ─────────────────────────────────────────
-    // GET ALL ORDERS
+    // UPDATE ORDER STATUS (with inventory restoration on cancel)
     // ─────────────────────────────────────────
-    async getAllOrders(filters = {}) {
-        try {
-            const query = {};
-            
-            // Apply filters
-            if (filters.status) query.status = filters.status;
-            if (filters.paymentStatus) query.paymentStatus = filters.paymentStatus;
-            if (filters.receivingMode) query.receivingMode = filters.receivingMode;
-            if (filters.customerEmail) query.customerEmail = filters.customerEmail;
-            if (filters.productId) query.productId = filters.productId;
-            if (filters.orderedBy) query.orderedBy = filters.orderedBy;
-            if (filters.orderedByModel) query.orderedByModel = filters.orderedByModel;
-            
-            // Date range filters
-            if (filters.startDate) {
-                query.orderedAt = { $gte: new Date(filters.startDate) };
-            }
-            if (filters.endDate) {
-                query.orderedAt = { ...query.orderedAt, $lte: new Date(filters.endDate) };
-            }
-
-            const orders = await Order.find(query)
-                .populate('orderedByDetails')
-                .populate('updatedByDetails')
-                .sort({ orderedAt: -1 });
-
-            return { success: true, data: orders };
-        } catch (error) {
-            console.error('Error fetching orders:', error);
-            throw error;
-        }
-    }
-
-    // ─────────────────────────────────────────
-    // GET ORDER BY ID
-    // ─────────────────────────────────────────
-    async getOrderById(orderId) {
-        try {
-            const order = await Order.findOne({ orderId })
-                .populate('orderedByDetails')
-                .populate('updatedByDetails');
-            
-            if (!order) {
-                return { success: false, message: 'Order not found' };
-            }
-
-            // Get product details
-            const product = await Product.findOne({ productId: order.productId });
-            
-            return { 
-                success: true, 
-                data: {
-                    ...order.toObject(),
-                    productDetails: product
-                }
-            };
-        } catch (error) {
-            console.error('Error fetching order:', error);
-            throw error;
-        }
-    }
-
-    // ─────────────────────────────────────────
-    // GET ORDERS BY ORDERED BY (Admin/Customer)
-    // ─────────────────────────────────────────
-    async getOrdersByOrderedBy(orderedById, orderedByModel) {
-        try {
-            const orders = await Order.find({ 
-                orderedBy: orderedById, 
-                orderedByModel: orderedByModel 
-            })
-                .populate('orderedByDetails')
-                .sort({ orderedAt: -1 });
-            
-            return { 
-                success: true, 
-                data: orders,
-                count: orders.length
-            };
-        } catch (error) {
-            console.error('Error fetching orders by orderedBy:', error);
-            throw error;
-        }
-    }
-
-    // ─────────────────────────────────────────
-    // GET ORDERS BY CUSTOMER EMAIL
-    // ─────────────────────────────────────────
-    async getOrdersByCustomerEmail(customerEmail) {
-        try {
-            const orders = await Order.find({ customerEmail })
-                .populate('orderedByDetails')
-                .sort({ orderedAt: -1 });
-            
-            if (orders.length === 0) {
-                return { success: false, message: 'No orders found for this customer' };
-            }
-            
-            return { success: true, data: orders };
-        } catch (error) {
-            console.error('Error fetching customer orders:', error);
-            throw error;
-        }
-    }
-
-    // ─────────────────────────────────────────
-    // UPDATE ORDER STATUS with polymorphic updater
-    // ─────────────────────────────────────────
-    async updateOrderStatus(orderId, newStatus, notes = '', user = null, userType = null) {
+    async updateOrderStatus(orderId, newStatus, notes = '', user = null) {
         try {
             const validStatuses = ['Pending', 'Scheduled', 'In Production', 'Out for Delivery', 'Completed', 'Cancelled'];
             
@@ -276,7 +143,6 @@ async createOrder(payload, user = null, userType = null) {
                 return { success: false, message: 'Order not found' };
             }
 
-            // If order is already completed or cancelled, prevent status change
             if (order.status === 'Completed' || order.status === 'Cancelled') {
                 return { 
                     success: false, 
@@ -288,14 +154,16 @@ async createOrder(payload, user = null, userType = null) {
             if (newStatus === 'Cancelled' && order.status !== 'Cancelled') {
                 const product = await Product.findOne({ productId: order.productId });
                 if (product) {
-                    const inventory = await InventoryItem.findOne({
-                        item: product._id,
-                        sizeLabel: order.size
-                    });
+                    // In your OrderService createOrder method
+const inventory = await InventoryItem.findOne({
+    product: product._id,  // ✅ This is correct for your data
+    sizeLabel: { $regex: new RegExp(`^${payload.size}$`, 'i') }
+});
                     
                     if (inventory) {
                         inventory.stock += order.quantity;
                         await inventory.save();
+                        console.log(`Inventory restored: +${order.quantity} to ${inventory.sizeLabel}`);
                     }
                 }
             }
@@ -306,17 +174,14 @@ async createOrder(payload, user = null, userType = null) {
                 status: newStatus,
                 timestamp: new Date(),
                 notes: notes,
-                updatedBy: user ? user._id : null,
-                updatedByModel: userType
+                updatedBy: user ? user._id.toString() : null
             });
             order.updatedAt = new Date();
             if (user) {
-                order.updatedBy = user._id;
-                order.updatedByModel = userType;
+                order.updatedBy = user._id.toString();
             }
             
             await order.save();
-            await order.populate('orderedByDetails updatedByDetails');
 
             return {
                 success: true,
@@ -331,69 +196,14 @@ async createOrder(payload, user = null, userType = null) {
     }
 
     // ─────────────────────────────────────────
-    // UPDATE PAYMENT STATUS
+    // UPDATE ORDER (with quantity adjustment)
     // ─────────────────────────────────────────
-    async updatePaymentStatus(orderId, paymentStatus, amountPaid = null, user = null, userType = null) {
+    async updateOrder(orderId, payload, user = null) {
         try {
-            const validStatuses = ['Paid', 'Partial', 'Unpaid'];
+            const { orderId: _id, orderedAt, orderedBy, ...updateData } = payload;
             
-            if (!validStatuses.includes(paymentStatus)) {
-                return { success: false, message: 'Invalid payment status' };
-            }
-
-            const order = await Order.findOne({ orderId });
-            
-            if (!order) {
-                return { success: false, message: 'Order not found' };
-            }
-
-            const oldPaymentStatus = order.paymentStatus;
-            order.paymentStatus = paymentStatus;
-            
-            // If payment status is changed to Partial, track partial payments
-            if (paymentStatus === 'Partial' && amountPaid) {
-                order.partialPayments = order.partialPayments || [];
-                order.partialPayments.push({
-                    amount: amountPaid,
-                    date: new Date(),
-                    updatedBy: user ? user._id : null,
-                    updatedByModel: userType
-                });
-            }
-            
-            order.updatedAt = new Date();
-            if (user) {
-                order.updatedBy = user._id;
-                order.updatedByModel = userType;
-            }
-            
-            await order.save();
-            await order.populate('orderedByDetails updatedByDetails');
-
-            return {
-                success: true,
-                message: `Payment status updated from ${oldPaymentStatus} to ${paymentStatus}`,
-                data: order
-            };
-
-        } catch (error) {
-            console.error('Error updating payment status:', error);
-            throw error;
-        }
-    }
-
-    // ─────────────────────────────────────────
-    // UPDATE ORDER
-    // ─────────────────────────────────────────
-    async updateOrder(orderId, payload, user = null, userType = null) {
-        try {
-            const { orderId: _id, orderedAt, ...updateData } = payload;
-            
-            // Don't allow updating certain fields
             delete updateData.orderId;
             delete updateData.orderedAt;
-            delete updateData.orderedBy;
-            delete updateData.orderedByModel;
             
             // If updating quantity, adjust inventory
             if (updateData.quantity) {
@@ -407,9 +217,9 @@ async createOrder(payload, user = null, userType = null) {
                 
                 if (product && quantityDiff !== 0) {
                     const inventory = await InventoryItem.findOne({
-                        item: product._id,
-                        sizeLabel: order.size
-                    });
+    product: product._id,  // ← Use 'product' field
+    sizeLabel: { $regex: new RegExp(`^${order.size}$`, 'i') }
+});
                     
                     if (inventory) {
                         if (quantityDiff > 0 && inventory.stock < quantityDiff) {
@@ -426,15 +236,14 @@ async createOrder(payload, user = null, userType = null) {
             
             updateData.updatedAt = new Date();
             if (user) {
-                updateData.updatedBy = user._id;
-                updateData.updatedByModel = userType;
+                updateData.updatedBy = user._id.toString();
             }
             
             const order = await Order.findOneAndUpdate(
                 { orderId },
                 updateData,
                 { new: true, runValidators: true }
-            ).populate('orderedByDetails updatedByDetails');
+            );
             
             if (!order) {
                 return { success: false, message: 'Order not found' };
@@ -453,7 +262,7 @@ async createOrder(payload, user = null, userType = null) {
     }
 
     // ─────────────────────────────────────────
-    // DELETE ORDER
+    // DELETE ORDER (with inventory restoration)
     // ─────────────────────────────────────────
     async deleteOrder(orderId) {
         try {
@@ -468,9 +277,9 @@ async createOrder(payload, user = null, userType = null) {
                 const product = await Product.findOne({ productId: order.productId });
                 if (product) {
                     const inventory = await InventoryItem.findOne({
-                        item: product._id,
-                        sizeLabel: order.size
-                    });
+    product: product._id,  // ← Use 'product' field
+    sizeLabel: { $regex: new RegExp(`^${order.size}$`, 'i') }
+});
                     
                     if (inventory) {
                         inventory.stock += order.quantity;
@@ -493,15 +302,153 @@ async createOrder(payload, user = null, userType = null) {
     }
 
     // ─────────────────────────────────────────
+    // GET ALL ORDERS
+    // ─────────────────────────────────────────
+    async getAllOrders(filters = {}) {
+        try {
+            const query = {};
+            
+            if (filters.status) query.status = filters.status;
+            if (filters.paymentStatus) query.paymentStatus = filters.paymentStatus;
+            if (filters.receivingMode) query.receivingMode = filters.receivingMode;
+            if (filters.customerEmail) query.customerEmail = filters.customerEmail;
+            if (filters.productId) query.productId = filters.productId;
+            if (filters.orderedBy) query.orderedBy = filters.orderedBy;
+            
+            if (filters.startDate) {
+                query.orderedAt = { $gte: new Date(filters.startDate) };
+            }
+            if (filters.endDate) {
+                query.orderedAt = { ...query.orderedAt, $lte: new Date(filters.endDate) };
+            }
+
+            const orders = await Order.find(query).sort({ orderedAt: -1 });
+            return { success: true, data: orders };
+        } catch (error) {
+            console.error('Error fetching orders:', error);
+            throw error;
+        }
+    }
+
+    // ─────────────────────────────────────────
+    // GET ORDER BY ID
+    // ─────────────────────────────────────────
+    async getOrderById(orderId) {
+        try {
+            const order = await Order.findOne({ orderId });
+            
+            if (!order) {
+                return { success: false, message: 'Order not found' };
+            }
+
+            const product = await Product.findOne({ productId: order.productId });
+            
+            return { 
+                success: true, 
+                data: {
+                    ...order.toObject(),
+                    productDetails: product
+                }
+            };
+        } catch (error) {
+            console.error('Error fetching order:', error);
+            throw error;
+        }
+    }
+
+    // ─────────────────────────────────────────
+    // GET ORDERS BY ORDERED BY
+    // ─────────────────────────────────────────
+    async getOrdersByOrderedBy(orderedById) {
+        try {
+            const orders = await Order.find({ orderedBy: orderedById })
+                .sort({ orderedAt: -1 });
+            
+            return { 
+                success: true, 
+                data: orders,
+                count: orders.length
+            };
+        } catch (error) {
+            console.error('Error fetching orders by orderedBy:', error);
+            throw error;
+        }
+    }
+
+    // ─────────────────────────────────────────
+    // GET ORDERS BY CUSTOMER EMAIL
+    // ─────────────────────────────────────────
+    async getOrdersByCustomerEmail(customerEmail) {
+        try {
+            const orders = await Order.find({ customerEmail })
+                .sort({ orderedAt: -1 });
+            
+            if (orders.length === 0) {
+                return { success: false, message: 'No orders found for this customer' };
+            }
+            
+            return { success: true, data: orders };
+        } catch (error) {
+            console.error('Error fetching customer orders:', error);
+            throw error;
+        }
+    }
+
+    // ─────────────────────────────────────────
+    // UPDATE PAYMENT STATUS
+    // ─────────────────────────────────────────
+    async updatePaymentStatus(orderId, paymentStatus, amountPaid = null, user = null) {
+        try {
+            const validStatuses = ['Paid', 'Partial', 'Unpaid'];
+            
+            if (!validStatuses.includes(paymentStatus)) {
+                return { success: false, message: 'Invalid payment status' };
+            }
+
+            const order = await Order.findOne({ orderId });
+            
+            if (!order) {
+                return { success: false, message: 'Order not found' };
+            }
+
+            const oldPaymentStatus = order.paymentStatus;
+            order.paymentStatus = paymentStatus;
+            
+            if (paymentStatus === 'Partial' && amountPaid) {
+                order.partialPayments = order.partialPayments || [];
+                order.partialPayments.push({
+                    amount: amountPaid,
+                    date: new Date(),
+                    updatedBy: user ? user._id.toString() : null
+                });
+            }
+            
+            order.updatedAt = new Date();
+            if (user) {
+                order.updatedBy = user._id.toString();
+            }
+            
+            await order.save();
+
+            return {
+                success: true,
+                message: `Payment status updated from ${oldPaymentStatus} to ${paymentStatus}`,
+                data: order
+            };
+
+        } catch (error) {
+            console.error('Error updating payment status:', error);
+            throw error;
+        }
+    }
+
+    // ─────────────────────────────────────────
     // GET ORDER STATISTICS
     // ─────────────────────────────────────────
     async getOrderStatistics() {
         try {
             const totalOrders = await Order.countDocuments();
             const pendingOrders = await Order.countDocuments({ status: 'Pending' });
-            const scheduledOrders = await Order.countDocuments({ status: 'Scheduled' });
-            const inProductionOrders = await Order.countDocuments({ status: 'In Production' });
-            const outForDeliveryOrders = await Order.countDocuments({ status: 'Out for Delivery' });
             const completedOrders = await Order.countDocuments({ status: 'Completed' });
             const cancelledOrders = await Order.countDocuments({ status: 'Cancelled' });
             
@@ -509,51 +456,15 @@ async createOrder(payload, user = null, userType = null) {
                 { $match: { status: 'Completed', paymentStatus: 'Paid' } },
                 { $group: { _id: null, total: { $sum: '$amount' } } }
             ]);
-            
-            const pendingRevenue = await Order.aggregate([
-                { $match: { paymentStatus: 'Unpaid' } },
-                { $group: { _id: null, total: { $sum: '$amount' } } }
-            ]);
-            
-            const ordersByMonth = await Order.aggregate([
-                {
-                    $group: {
-                        _id: {
-                            year: { $year: '$orderedAt' },
-                            month: { $month: '$orderedAt' }
-                        },
-                        count: { $sum: 1 },
-                        revenue: { $sum: '$amount' }
-                    }
-                },
-                { $sort: { '_id.year': -1, '_id.month': -1 } },
-                { $limit: 6 }
-            ]);
-
-            const ordersByOrderedByType = await Order.aggregate([
-                {
-                    $group: {
-                        _id: '$orderedByModel',
-                        count: { $sum: 1 },
-                        totalAmount: { $sum: '$amount' }
-                    }
-                }
-            ]);
 
             return {
                 success: true,
                 data: {
                     totalOrders,
                     pendingOrders,
-                    scheduledOrders,
-                    inProductionOrders,
-                    outForDeliveryOrders,
                     completedOrders,
                     cancelledOrders,
-                    totalRevenue: totalRevenue[0]?.total || 0,
-                    pendingRevenue: pendingRevenue[0]?.total || 0,
-                    ordersByMonth,
-                    ordersByOrderedByType
+                    totalRevenue: totalRevenue[0]?.total || 0
                 }
             };
         } catch (error) {
@@ -572,9 +483,7 @@ async createOrder(payload, user = null, userType = null) {
                     $gte: new Date(startDate),
                     $lte: new Date(endDate)
                 }
-            })
-                .populate('orderedByDetails')
-                .sort({ orderedAt: -1 });
+            }).sort({ orderedAt: -1 });
             
             return { success: true, data: orders };
         } catch (error) {

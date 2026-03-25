@@ -42,27 +42,27 @@ router.get('/admin/orders/:orderId', orderController.getOrderById);
 router.put('/admin/orders/:orderId', orderController.updateOrder);
 router.delete('/admin/orders/:orderId', orderController.deleteOrder);
 
-// Status management (requires specific roles)
-router.patch('/admin/orders/:orderId/status', 
-    checkRole('admin', 'production_manager'), 
-    orderController.updateOrderStatus
-);
+// // Status management (requires specific roles)
+// router.patch('/admin/orders/:orderId/status', 
+//     checkRole('admin', 'production_manager'), 
+//     orderController.updateOrderStatus
+// );
 
-router.patch('/admin/orders/:orderId/payment', 
-    checkRole('admin', 'sales_manager'), 
-    orderController.updatePaymentStatus
-);
+// router.patch('/admin/orders/:orderId/payment', 
+//     checkRole('admin', 'sales_manager'), 
+//     orderController.updatePaymentStatus
+// );
 
-// Customer management for admins
-router.get('/admin/customers/:email/orders', 
-    checkRole('admin', 'sales_manager'), 
-    orderController.getOrdersByCustomerEmail
-);
+// // Customer management for admins
+// router.get('/admin/customers/:email/orders', 
+//     checkRole('admin', 'sales_manager'), 
+//     orderController.getOrdersByCustomerEmail
+// );
 
-// Get orders by orderedBy (who placed the order)
-router.get('/admin/ordered-by/:orderedById/:orderedByModel', 
-    checkRole('admin'), 
-    orderController.getOrdersByOrderedBy
-);
+// // Get orders by orderedBy (who placed the order)
+// router.get('/admin/ordered-by/:orderedById/:orderedByModel', 
+//     checkRole('admin'), 
+//     orderController.getOrdersByOrderedBy
+// );
 
 module.exports = router;

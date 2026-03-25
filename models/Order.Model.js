@@ -24,7 +24,6 @@ const orderSchema = new mongoose.Schema({
     },
     productId: {
         type: String,
-        required: true
     },
     size: {
         type: String,
@@ -82,12 +81,7 @@ const orderSchema = new mongoose.Schema({
                 trim: true
             },
             updatedBy: {
-                type: mongoose.Schema.Types.ObjectId,
-                refPath: 'statusHistory.updatedByModel'
-            },
-            updatedByModel: {
-                type: String,
-                enum: ['Admin', 'Customer']
+                type: String  // Store the ID as string (Admin ID or Customer ID)
             }
         }
     ],
@@ -108,12 +102,7 @@ const orderSchema = new mongoose.Schema({
                 default: Date.now
             },
             updatedBy: {
-                type: mongoose.Schema.Types.ObjectId,
-                refPath: 'partialPayments.updatedByModel'
-            },
-            updatedByModel: {
-                type: String,
-                enum: ['Admin', 'Customer']
+                type: String  // Store the ID as string
             }
         }
     ],
@@ -131,11 +120,11 @@ const orderSchema = new mongoose.Schema({
         required: true,
         default: true
     },
-    // Polymorphic field for who placed the order (can be Admin or Customer)
+    // Store the ID of who placed the order (Admin ID or Customer ID)
     orderedBy: {
-        type: mongoose.Schema.Types.ObjectId,
+        type: String,
         required: true,
-        refPath: 'orderedByModel'
+        index: true
     },
     orderedAt: {
         type: Date,
@@ -147,40 +136,19 @@ const orderSchema = new mongoose.Schema({
         default: Date.now
     },
     updatedBy: {
-        type: mongoose.Schema.Types.ObjectId,
-        refPath: 'updatedByModel'
-    },
-    updatedByModel: {
-        type: String,
-        enum: ['Sales','Production', 'Customer']
+        type: String  // Store the ID of who last updated
     },
     notes: {
         type: String,
         trim: true
     }
-}, { timestamps: true });
+});
 
 // Indexes for better query performance
 orderSchema.index({ customerEmail: 1, orderedAt: -1 });
 orderSchema.index({ status: 1, orderedAt: -1 });
-orderSchema.index({ orderedBy: 1, orderedByModel: 1 });
+orderSchema.index({ orderedBy: 1, orderedAt: -1 });
 orderSchema.index({ expectedDelivery: 1 });
-
-// // Virtual to get ordered by details
-// orderSchema.virtual('orderedByDetails', {
-//     refPath: 'orderedByModel',
-//     localField: 'orderedBy',
-//     foreignField: '_id',
-//     justOne: true
-// });
-
-// // Virtual to get updated by details
-// orderSchema.virtual('updatedByDetails', {
-//     refPath: 'updatedByModel',
-//     localField: 'updatedBy',
-//     foreignField: '_id',
-//     justOne: true
-// });
 
 const Order = mongoose.model('Order', orderSchema);
 module.exports = Order;
