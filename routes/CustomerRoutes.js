@@ -13,6 +13,8 @@ router.get('/verify',    CustomerController.verifyToken);
 // ─────────────────────────────────────────
 // CUSTOMER PROTECTED ROUTES
 // ─────────────────────────────────────────
+router.post('/logout', verifyCustomerToken, CustomerController.logout);
+router.get('/profile', verifyCustomerToken, CustomerController.getProfile);
 router.put('/:customerId',          verifyCustomerToken, CustomerController.updateCustomer);
 router.put('/:customerId/password', verifyCustomerToken, CustomerController.changePassword);
 

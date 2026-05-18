@@ -21,7 +21,7 @@ const customerSchema = new mongoose.Schema({
         required: true,
         trim: true
     },
-    userName: {
+    username: {
         type: String,
         required: true,
         unique: true,
@@ -32,9 +32,13 @@ const customerSchema = new mongoose.Schema({
         required: true,
         unique: true,
         trim: true,
-        lowercase: true,
+        lowecase: true,
         index: true
     },
+    companyName:{
+        type: String,
+        default: null,
+    },   
     password: {
         type: String,
         required: true  // Store only hashed passwords (e.g. bcrypt) — never plain text
@@ -65,6 +69,11 @@ const customerSchema = new mongoose.Schema({
             ref: 'Order'
         }
     ],  
+    signUpMethod: {
+        type: String,
+        enum: ['email', 'google', 'facebook'],
+        default: 'email'
+    },
     createdAt: {
         type: Date,
         default: Date.now,  // Real Date object, not a string

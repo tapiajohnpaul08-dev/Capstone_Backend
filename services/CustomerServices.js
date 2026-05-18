@@ -1,10 +1,11 @@
 const Customer = require('../models/Customer.Model');
+const BlacklistToken = require('../models/BlacklistToken'); // Add this
 const generateId = require('../utils/generateId');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
 const JWT_SECRET = process.env.JWT_SECRET;
-const JWT_EXPIRES_IN = '24h';
+const JWT_EXPIRES_IN = '15m';
 
 class CustomerService {
 
@@ -30,13 +31,17 @@ class CustomerService {
             const salt = await bcrypt.genSalt(10);
             const hashedPassword = await bcrypt.hash(payload.password, salt);
 
+            console.log('registering..:',payload.firstName);
+            
+
             const newCustomer = new Customer({
                 customerId: await generateId(),
                 firstName:  payload.firstName,
                 middleName: payload.middleName || '',
                 lastName:   payload.lastName,
-                userName:   payload.userName,
+                username:   payload.username,
                 email:      payload.email,
+                companyName: payload.companyName || null,
                 password:   hashedPassword,
             });
 
@@ -63,7 +68,6 @@ class CustomerService {
     async login(payload) {
         try {
             const { email, password } = payload;
-
             const customer = await Customer.findOne({ email: email.toLowerCase() });
 
             if (!customer) {
@@ -84,10 +88,10 @@ class CustomerService {
 
             const token = jwt.sign(
                 {
-                    id:         customer._id,
+                    id: customer._id,
                     customerId: customer.customerId,
-                    email:      customer.email,
-                    userName:   customer.userName,
+                    email: customer.email,
+                    userName: customer.userName,
                 },
                 JWT_SECRET,
                 { expiresIn: JWT_EXPIRES_IN }
@@ -108,13 +112,59 @@ class CustomerService {
         }
     }
 
+async logout(token) {
+        try {
+            if (!token) {
+                return {
+                    success: false,
+                    message: 'No token provided'
+                };
+            }
+
+            // Verify token to get expiry
+            const decoded = jwt.verify(token, JWT_SECRET);
+            
+            // Add token to blacklist
+            await BlacklistToken.create({
+                token: token,
+                expiresAt: new Date(decoded.exp * 1000) // Convert to milliseconds
+            });
+
+            console.log('Token blacklisted successfully');
+
+            return {
+                success: true,
+                message: 'Logged out successfully'
+            };
+            
+        } catch (error) {
+            console.error('Error during logout:', error);
+            throw error;
+        }
+    }
+
     // ─────────────────────────────────────────
     // VERIFY TOKEN
     // ─────────────────────────────────────────
-    async verifyToken(token) {
+     async verifyToken(token) {
         try {
-            const decoded = jwt.verify(token, JWT_SECRET);
+            if (!token) {
+                return { success: false, message: 'No token provided' };
+            }
 
+            // Check if token is blacklisted
+            const isBlacklisted = await BlacklistToken.findOne({ token });
+            
+            if (isBlacklisted) {
+                return { 
+                    success: false, 
+                    message: 'Token has been invalidated. Please login again.' 
+                };
+            }
+
+            // Verify JWT token
+            const decoded = jwt.verify(token, JWT_SECRET);
+            
             const customer = await Customer.findById(decoded.id).select('-password');
 
             if (!customer) {
@@ -245,6 +295,8 @@ class CustomerService {
             throw error;
         }
     }
+
+
 }
 
 module.exports = new CustomerService();

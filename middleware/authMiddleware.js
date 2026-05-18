@@ -6,7 +6,8 @@ const customerService = require('../services/CustomerServices');
 // ─────────────────────────────────────────
 const verifyAdminToken = async (req, res, next) => {
     try {
-        const token = req.headers.authorization?.split(' ')[1] || req.cookies?.adminToken;
+        // Only check Authorization header, no cookies
+        const token = req.headers.authorization?.split(' ')[1];
 
         if (!token) {
             return res.status(401).json({
@@ -20,7 +21,7 @@ const verifyAdminToken = async (req, res, next) => {
         if (!response.success) {
             return res.status(401).json({
                 success: false,
-                message: response.message   // "Token has expired" or "Invalid token"
+                message: response.message
             });
         }
 
@@ -41,7 +42,7 @@ const verifyAdminToken = async (req, res, next) => {
 // ─────────────────────────────────────────
 const verifyCustomerToken = async (req, res, next) => {
     try {
-        const token = req.headers.authorization?.split(' ')[1] || req.cookies?.customerToken;
+        const token = req.headers.authorization?.split(' ')[1];
 
         if (!token) {
             return res.status(401).json({
@@ -55,7 +56,7 @@ const verifyCustomerToken = async (req, res, next) => {
         if (!response.success) {
             return res.status(401).json({
                 success: false,
-                message: response.message   // "Token has expired" or "Invalid token"
+                message: response.message
             });
         }
 
@@ -70,15 +71,13 @@ const verifyCustomerToken = async (req, res, next) => {
         });
     }
 };
-
 // ─────────────────────────────────────────
 // EITHER ADMIN OR CUSTOMER (shared routes)
 // ─────────────────────────────────────────
 const verifyAnyToken = async (req, res, next) => {
     try {
-        const token = req.headers.authorization?.split(' ')[1]
-            || req.cookies?.adminToken
-            || req.cookies?.customerToken;
+        // Only check Authorization header
+        const token = req.headers.authorization?.split(' ')[1];
 
         if (!token) {
             return res.status(401).json({
@@ -117,7 +116,7 @@ const verifyAnyToken = async (req, res, next) => {
 };
 
 // ─────────────────────────────────────────
-// ROLE CHECK (admin only — Sales/Production)
+// ROLE CHECK (admin only)
 // ─────────────────────────────────────────
 const checkRole = (...roles) => {
     return (req, res, next) => {

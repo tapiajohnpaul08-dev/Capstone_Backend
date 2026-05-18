@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const cookieParser = require('cookie-parser');
 
 require('dotenv').config();
 require('./config/db_config');
@@ -17,6 +18,7 @@ app.use(cors({
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
+// app.use(cookieParser());
 app.use(helmet());
 app.use(morgan('dev'));
 app.use(express.json());

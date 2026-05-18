@@ -17,12 +17,39 @@ class CustomerController {
         res.status(status).json(response);
     });
 
+    // POST /api/v1/customer/logout - Blacklist the token
+    logout = asyncTryCatch(async (req, res, next) => {
+        // Get token from Authorization header
+        const token = req.headers.authorization?.split(' ')[1];
+        
+        if (!token) {
+            return res.status(401).json({
+                success: false,
+                message: 'No token provided'
+            });
+        }
+        
+        // Blacklist the token
+        const response = await customerService.logout(token);
+        
+        const status = response.success ? 200 : 400;
+        res.status(status).json(response);
+    });
+
     // GET /api/v1/customer/verify
     verifyToken = asyncTryCatch(async (req, res, next) => {
         const token = req.headers.authorization?.split(' ')[1];
         const response = await customerService.verifyToken(token);
         const status = response.success ? 200 : 401;
         res.status(status).json(response);
+    });
+
+    // GET /api/v1/customer/profile
+    getProfile = asyncTryCatch(async (req, res, next) => {
+        res.status(200).json({
+            success: true,
+            data: req.customer
+        });
     });
 
     // GET /api/v1/customer

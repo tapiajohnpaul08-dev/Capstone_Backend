@@ -2,8 +2,7 @@
 const mongoose = require('mongoose');
 
 const inventoryItemSchema = new mongoose.Schema({
-    inventoryId: { type: String, required: true, unique: true },
-    
+      
     // For products - matches your database field
     product: { 
         type: mongoose.Schema.Types.ObjectId, 
