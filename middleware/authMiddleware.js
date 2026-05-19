@@ -17,11 +17,11 @@ const verifyAdminToken = async (req, res, next) => {
         }
 
         const response = await adminService.verifyToken(token);
-
+        console.log('Admin verify response:', response.success);
         if (!response.success) {
             return res.status(401).json({
                 success: false,
-                message: response.message
+                message: response.message,
             });
         }
 
@@ -57,6 +57,7 @@ const verifyCustomerToken = async (req, res, next) => {
             return res.status(401).json({
                 success: false,
                 message: response.message
+                
             });
         }
 

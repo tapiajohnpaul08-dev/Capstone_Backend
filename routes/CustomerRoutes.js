@@ -18,11 +18,6 @@ router.get('/profile', verifyCustomerToken, CustomerController.getProfile);
 router.put('/:customerId',          verifyCustomerToken, CustomerController.updateCustomer);
 router.put('/:customerId/password', verifyCustomerToken, CustomerController.changePassword);
 
-// ─────────────────────────────────────────
-// ADMIN PROTECTED ROUTES (admin manages customers)
-// ─────────────────────────────────────────
-router.get('/',               verifyAdminToken, CustomerController.getAllCustomers);
-router.get('/:customerId',    verifyAdminToken, CustomerController.getCustomerById);
-router.delete('/:customerId', verifyAdminToken, CustomerController.deleteCustomer);
+
 
 module.exports = router;

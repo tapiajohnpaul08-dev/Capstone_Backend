@@ -17,9 +17,8 @@ class CustomerController {
         res.status(status).json(response);
     });
 
-    // POST /api/v1/customer/logout - Blacklist the token
+    // POST /api/v1/customer/logout
     logout = asyncTryCatch(async (req, res, next) => {
-        // Get token from Authorization header
         const token = req.headers.authorization?.split(' ')[1];
         
         if (!token) {
@@ -29,9 +28,7 @@ class CustomerController {
             });
         }
         
-        // Blacklist the token
         const response = await customerService.logout(token);
-        
         const status = response.success ? 200 : 400;
         res.status(status).json(response);
     });
@@ -50,12 +47,6 @@ class CustomerController {
             success: true,
             data: req.customer
         });
-    });
-
-    // GET /api/v1/customer
-    getAllCustomers = asyncTryCatch(async (req, res, next) => {
-        const response = await customerService.getAllCustomers();
-        res.status(200).json(response);
     });
 
     // GET /api/v1/customer/:customerId
