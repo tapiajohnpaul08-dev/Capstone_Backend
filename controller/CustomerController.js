@@ -5,7 +5,55 @@ class CustomerController {
 
     // POST /api/v1/customer/register
     register = asyncTryCatch(async (req, res, next) => {
-        const response = await customerService.register(req.body);
+        const { otp, ...customerData } = req.body;
+        
+        // Validate OTP is provided
+        if (!otp) {
+            return res.status(400).json({
+                success: false,
+                message: 'OTP is required for registration'
+            });
+        }
+        
+        // Register with OTP verification
+        const response = await customerService.register(customerData, otp);
+        
+        if (response.success) {
+            // Auto-login after successful registration
+            const loginResponse = await customerService.login({
+                email: customerData.email,
+                password: customerData.password
+            });
+            
+            if (loginResponse.success) {
+                // Return registration data with token for auto-login
+                return res.status(201).json({
+                    success: true,
+                    message: 'Registration successful. You are now logged in.',
+                    data: {
+                        customer: response.data,
+                        token: loginResponse.data.token
+                    }
+                });
+            }
+        }
+        
+        const status = response.success ? 201 : 400;
+        res.status(status).json(response);
+    });
+
+    // POST /api/v1/customer/register-without-auto-login (alternative - no auto-login)
+    registerWithoutAutoLogin = asyncTryCatch(async (req, res, next) => {
+        const { otp, ...customerData } = req.body;
+        
+        if (!otp) {
+            return res.status(400).json({
+                success: false,
+                message: 'OTP is required for registration'
+            });
+        }
+        
+        const response = await customerService.register(customerData, otp);
         const status = response.success ? 201 : 400;
         res.status(status).json(response);
     });

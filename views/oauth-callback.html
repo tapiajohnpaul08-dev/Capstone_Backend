@@ -1,0 +1,30 @@
+<!-- oauth-callback.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OAuth Login</title>
+</head>
+<body>
+    <script>
+        // Get token and user data from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const token = urlParams.get('token');
+        const userDataParam = urlParams.get('user');
+        
+        if (token && userDataParam) {
+            const userData = JSON.parse(decodeURIComponent(userDataParam));
+            
+            // Store token in localStorage
+            localStorage.setItem('authToken', token);
+            localStorage.setItem('userData', JSON.stringify(userData));
+            
+            // Redirect to dashboard or close popup
+            window.opener?.postMessage({ type: 'oauth-success', token, user: userData }, '*');
+            window.location.href = '/dashboard';
+        } else {
+            // Handle error
+            window.location.href = '/login?error=oauth_failed';
+        }
+    </script>
+</body>
+</html>

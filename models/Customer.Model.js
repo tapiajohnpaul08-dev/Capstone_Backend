@@ -41,7 +41,6 @@ const customerSchema = new mongoose.Schema({
     },   
     password: {
         type: String,
-        required: true  // Store only hashed passwords (e.g. bcrypt) — never plain text
     },
     templateDesigns: [
         {
@@ -69,11 +68,13 @@ const customerSchema = new mongoose.Schema({
             ref: 'Order'
         }
     ],  
-    signUpMethod: {
-        type: String,
-        enum: ['email', 'google', 'facebook'],
-        default: 'email'
-    },
+
+    // OAuth fields
+    provider: { type: String, enum: ['google', 'facebook', 'local'], default: 'local' },
+    providerId: { type: String, unique: true, sparse: true },
+    profileImage: { type: String, default: null },
+    isEmailVerified: { type: Boolean, default: false },
+
     createdAt: {
         type: Date,
         default: Date.now,  // Real Date object, not a string

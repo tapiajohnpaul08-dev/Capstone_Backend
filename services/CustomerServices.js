@@ -4,6 +4,9 @@ const generateId = require('../utils/generateId');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
+const { verifyOtp } = require('../utils/otpUtils'); // Add this import
+
+
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = '24h';
 
@@ -12,55 +15,80 @@ class CustomerService {
     // ─────────────────────────────────────────
     // REGISTER
     // ─────────────────────────────────────────
-    async register(payload) {
-        try {
-            const existingCustomer = await Customer.findOne({
-                $or: [
-                    { email: payload.email.toLowerCase() },
-                    { userName: payload.userName }
-                ]
-            });
-
-            if (existingCustomer) {
-                return {
-                    success: false,
-                    message: 'A customer with this email or username already exists'
-                };
-            }
-
-            const salt = await bcrypt.genSalt(10);
-            const hashedPassword = await bcrypt.hash(payload.password, salt);
-
-            console.log('registering..:',payload.firstName);
-            
-
-            const newCustomer = new Customer({
-                customerId: await generateId(),
-                firstName:  payload.firstName,
-                middleName: payload.middleName || '',
-                lastName:   payload.lastName,
-                username:   payload.username,
-                email:      payload.email,
-                companyName: payload.companyName || null,
-                password:   hashedPassword,
-            });
-
-            await newCustomer.save();
-
-            const customerData = newCustomer.toObject();
-            delete customerData.password;
-
+    // Update the register method to properly validate OTP
+async register(payload, otp) {
+    try {
+        // Validate email exists
+        if (!payload.email) {
             return {
-                success: true,
-                message: 'Customer registered successfully',
-                data: customerData
+                success: false,
+                message: 'Email is required'
             };
-
-        } catch (error) {
-            console.error('Error registering customer:', error);
-            throw error;
         }
+
+        // First verify OTP (must be valid to proceed)
+        if (!otp) {
+            return {
+                success: false,
+                message: 'OTP is required. Please request an OTP first.'
+            };
+        }
+        
+        const otpVerification = await verifyOtp(payload.email, otp);
+        if (!otpVerification.success) {
+            return {
+                success: false,
+                message: otpVerification.message
+            };
+        }
+
+        // Check if customer already exists
+        const existingCustomer = await Customer.findOne({
+            $or: [
+                { email: payload.email.toLowerCase() },
+                { username: payload.username }
+            ]
+        });
+
+        if (existingCustomer) {
+            return {
+                success: false,
+                message: 'A customer with this email or username already exists'
+            };
+        }
+
+        // Create new customer
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(payload.password, salt);
+
+        const newCustomer = new Customer({
+            customerId: await generateId(),
+            firstName: payload.firstName,
+            middleName: payload.middleName || '',
+            lastName: payload.lastName,
+            username: payload.username,
+            email: payload.email.toLowerCase(),
+            companyName: payload.companyName || null,
+            isEmailVerified: true, // Mark email as verified since OTP was valid
+            password: hashedPassword,
+        });
+
+        await newCustomer.save();
+
+        const customerData = newCustomer.toObject();
+        delete customerData.password;
+
+        return {
+            success: true,
+            message: 'Customer registered successfully',
+            data: customerData
+        };
+
+    } catch (error) {
+        console.error('Error registering customer:', error);
+        throw error;
     }
+}
 
     // ─────────────────────────────────────────
     // LOGIN

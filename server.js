@@ -2,7 +2,9 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
-const cookieParser = require('cookie-parser');
+// const cookieParser = require('cookie-parser');
+const session = require('express-session'); // Add this
+const passport = require('./config/passport'); // Add this
 
 require('dotenv').config();
 require('./config/db_config');
@@ -12,6 +14,23 @@ const app = express();
 // ─────────────────────────────────────────
 // MIDDLEWARE
 // ─────────────────────────────────────────
+
+// Session middleware (required for Passport)
+app.use(session({
+    secret: process.env.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+        secure: process.env.NODE_ENV === 'production',
+        httpOnly: true,
+        maxAge: 24 * 60 * 60 * 1000 // 24 hours
+    }
+}));
+
+// Passport middleware
+app.use(passport.initialize());
+app.use(passport.session());
+
 app.use(cors({
     origin: true,
     credentials: true,
@@ -33,6 +52,10 @@ app.use('/api/v1/product',   require('./routes/ProductRoutes'));
 app.use('/api/v1/inventory', require('./routes/InventoryItemRoutes'));
 app.use('/api/v1/material',  require('./routes/RawMaterialRoutes'));
 app.use('/api/v1/order',     require('./routes/OrderRoutes')); // Added order routes
+
+app.use('/api/v1/otp', require('./routes/OtpRoutes'));
+app.use('/api/v1/auth', require('./routes/OAuthRoutes'));
+
 
 // ─────────────────────────────────────────
 // 404 HANDLER
