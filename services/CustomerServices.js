@@ -18,23 +18,23 @@ class CustomerService {
     // Update the register method to properly validate OTP
 async register(payload, otp) {
     try {
-        // Validate email exists
-        if (!payload.email) {
-            return {
-                success: false,
-                message: 'Email is required'
-            };
-        }
-
-        // First verify OTP (must be valid to proceed)
+        console.log('=== REGISTER DEBUG ===');
+        console.log('Received payload:', JSON.stringify(payload, null, 2));
+        console.log('Received OTP:', otp);
+        
+        // Check if OTP is provided
         if (!otp) {
+            console.log('No OTP provided');
             return {
                 success: false,
                 message: 'OTP is required. Please request an OTP first.'
             };
         }
         
+        // Verify OTP
         const otpVerification = await verifyOtp(payload.email, otp);
+        console.log('OTP verification result:', otpVerification);
+        
         if (!otpVerification.success) {
             return {
                 success: false,
@@ -51,41 +51,46 @@ async register(payload, otp) {
         });
 
         if (existingCustomer) {
+            console.log('Customer already exists:', existingCustomer.email);
             return {
                 success: false,
                 message: 'A customer with this email or username already exists'
             };
         }
 
-        // Create new customer
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(payload.password, salt);
-
-        const newCustomer = new Customer({
+        // Log the data being saved
+        const customerData = {
             customerId: await generateId(),
             firstName: payload.firstName,
             middleName: payload.middleName || '',
             lastName: payload.lastName,
             username: payload.username,
             email: payload.email.toLowerCase(),
+            phone: payload.phone || '',
             companyName: payload.companyName || null,
-            isEmailVerified: true, // Mark email as verified since OTP was valid
-            password: hashedPassword,
-        });
+            password: await bcrypt.hash(payload.password, await bcrypt.genSalt(10))
+        };
+        
+        console.log('Creating customer with data:', JSON.stringify(customerData, null, 2));
 
+        const newCustomer = new Customer(customerData);
         await newCustomer.save();
 
-        const customerData = newCustomer.toObject();
-        delete customerData.password;
+        const savedCustomer = newCustomer.toObject();
+        delete savedCustomer.password;
 
         return {
             success: true,
             message: 'Customer registered successfully',
-            data: customerData
+            data: savedCustomer
         };
 
     } catch (error) {
         console.error('Error registering customer:', error);
+        // Log the full error details
+        if (error.code === 11000) {
+            console.error('Duplicate key error:', error.keyPattern, error.keyValue);
+        }
         throw error;
     }
 }

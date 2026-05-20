@@ -27,6 +27,8 @@ const customerSchema = new mongoose.Schema({
         unique: true,
         index: true
     },
+    phone: { type: String, default: '' },  // ✅ Add this field
+
     email: {
         type: String,
         required: true,

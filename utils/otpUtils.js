@@ -42,18 +42,18 @@ const sendOtpEmail = async (email, otp) => {
             <div style="text-align: center; margin: 30px 0;">
                 <span style="font-size: 32px; font-weight: bold; letter-spacing: 5px; background: #f0f0f0; padding: 10px 20px; border-radius: 5px;">${otp}</span>
             </div>
-            <p style="color: #666; font-size: 14px;">This OTP is valid for 10 minutes.</p>
+            <p style="color: #666; font-size: 14px;">This OTP is valid for 1 minutes.</p>
             <p style="color: #999; font-size: 12px;">If you didn't request this, please ignore this email.</p>
         </div>
     `;
 
     try {
         await transporter.sendMail({
-            from: `"Your App" <${process.env.EMAIL_USER}>`,
+            from: `"ACAPHOP" <${process.env.EMAIL_USER}>`,
             to: email,
             subject: 'Verify Your Email - OTP Code',
             html: html,
-            text: `Your OTP for email verification is: ${otp}\n\nValid for 10 minutes.`
+            text: `Your OTP for email verification is: ${otp}\n\nValid for 1 minute.`
         });
         return true;
     } catch (error) {
@@ -94,7 +94,6 @@ const storeOtp = async (email, otp) => {
  */
 const verifyOtp = async (email, otp) => {
     const stored = otpStore.get(email);
-    
     if (!stored) {
         return { success: false, message: 'OTP not found or expired. Please request a new one.' };
     }
@@ -110,7 +109,8 @@ const verifyOtp = async (email, otp) => {
     }
     
     const isValid = await bcrypt.compare(otp, stored.hashedOtp);
-    
+    console.log(`Verifying OTP for ${email}:`, { otp, isValid });
+
     if (!isValid) {
         stored.attempts++;
         otpStore.set(email, stored);
@@ -118,7 +118,7 @@ const verifyOtp = async (email, otp) => {
     }
     
     // OTP is valid, remove it
-    otpStore.delete(email);
+    // otpStore.delete(email);
     return { success: true, message: 'OTP verified successfully' };
 };
 
