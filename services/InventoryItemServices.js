@@ -1,178 +1,184 @@
-// services/InventoryItemServices.js
+// services/InventoryItemService.js
 const InventoryItem = require('../models/InventoryItem.Model');
 const Product = require('../models/Product.Model');
-const RawMaterial = require('../models/RawMaterial.Model');
-const generateId = require('../utils/generateId');
+const Supply = require('../models/Supply.Model');
+const generateId = require('../utils/generateItemId');
 
-class InventoryItemService {
+class InventoryService {
 
     // ─────────────────────────────────────────
-    // CREATE
+    // ADD PRODUCT TO INVENTORY
     // ─────────────────────────────────────────
-    async createInventoryItem(payload) {
+    async addProductToInventory(productId, inventoryData) {
         try {
-            const { itemType, itemIdentifier, sizeLabel, ...rest } = payload;
-            
-            let item;
-            let itemDoc;
-            let finalItemType;
-            let finalSizeLabel = sizeLabel;
-
-            if (itemType === 'product') {
-                // Validate product exists
-                itemDoc = await Product.findOne({ productId: itemIdentifier });
-                if (!itemDoc) {
-                    return { success: false, message: 'Product not found' };
-                }
-
-                // Validate sizeLabel exists on the product
-                if (!sizeLabel) {
-                    return { success: false, message: 'Size label is required for products' };
-                }
-
-                const sizeExists = itemDoc.sizes.some(
-                    s => s.label.toLowerCase() === sizeLabel.toLowerCase()
-                );
-
-                if (!sizeExists) {
-                    return {
-                        success: false,
-                        message: `Size "${sizeLabel}" does not exist on this product`
-                    };
-                }
-
-                // Check for duplicate inventory entry
-                const existingItem = await InventoryItem.findOne({
-                    item: itemDoc._id,
-                    itemType: 'Product',
-                    sizeLabel: sizeLabel
-                });
-
-                if (existingItem) {
-                    return {
-                        success: false,
-                        message: `Inventory for ${itemDoc.name} - ${sizeLabel} already exists`
-                    };
-                }
-
-                item = itemDoc._id;
-                finalItemType = 'Product';
-
-            } else if (itemType === 'rawMaterial') {
-                // Validate raw material exists
-                itemDoc = await RawMaterial.findOne({ materialId: itemIdentifier });
-                if (!itemDoc) {
-                    return { success: false, message: 'Raw material not found' };
-                }
-
-                // Check for duplicate inventory entry
-                const existingItem = await InventoryItem.findOne({
-                    item: itemDoc._id,
-                    itemType: 'RawMaterial'
-                });
-
-                if (existingItem) {
-                    return {
-                        success: false,
-                        message: `Inventory for ${itemDoc.name} already exists`
-                    };
-                }
-
-                item = itemDoc._id;
-                finalItemType = 'RawMaterial';
-                finalSizeLabel = undefined; // Raw materials don't have size
-
-            } else {
-                return { success: false, message: 'Invalid item type. Must be "product" or "rawMaterial"' };
+            const product = await Product.findOne({ id: productId });
+            if (!product) {
+                return { success: false, message: 'Product not found' };
             }
 
-            const newItem = new InventoryItem({
-                inventoryId: await generateId(),
-                itemType: finalItemType,
-                item: item,
-                sizeLabel: finalSizeLabel,
-                unit: rest.unit,
-                stock: rest.stock || 0,
-                lowStockThreshold: rest.lowStockThreshold || (itemType === 'rawMaterial' ? 10 : 500),
-                notes: rest.notes,
-                location: rest.location,
-                lastRestocked: rest.stock ? new Date() : undefined
+            const existing = await InventoryItem.findOne({ itemRef: product._id, itemType: 'product' });
+            if (existing) {
+                return { success: false, message: 'Product already in inventory' };
+            }
+
+            const inventoryItem = new InventoryItem({
+                itemId: await generateId('INV', 4),
+                itemType: 'product',
+                itemRef: product._id,
+                stock: inventoryData.stock || 0,
+                unit: inventoryData.unit || 'piece',
+                threshold: inventoryData.threshold || 100,
+                unitCost: inventoryData.unitCost || (product.sizes?.[0]?.price || 0),
+                notes: inventoryData.notes || '',
+                location: inventoryData.location || 'Warehouse A',
+                binLocation: inventoryData.binLocation || ''
             });
 
-            await newItem.save();
+            await inventoryItem.save();
             
-            // Populate based on item type
-            await newItem.populate('item');
+            // Populate with specific model
+            await inventoryItem.populate({
+                path: 'itemRef',
+                model: 'Product'
+            });
 
             return {
                 success: true,
-                message: `Inventory item created successfully for ${itemDoc.name}`,
-                data: newItem
+                message: 'Product added to inventory successfully',
+                data: inventoryItem
             };
 
         } catch (error) {
-            console.error('Error creating inventory item:', error);
+            console.error('Error adding product to inventory:', error);
             throw error;
         }
     }
 
     // ─────────────────────────────────────────
-    // GET ALL
+    // ADD SUPPLY TO INVENTORY
     // ─────────────────────────────────────────
-    async getAllInventoryItems(filters = {}) {
+    async addSupplyToInventory(supplyId, inventoryData) {
         try {
-            const query = {};
+            const supply = await Supply.findOne({ supplyId });
+            if (!supply) {
+                return { success: false, message: 'Supply not found' };
+            }
+
+            const existing = await InventoryItem.findOne({ itemRef: supply._id, itemType: 'supply' });
+            if (existing) {
+                return { success: false, message: 'Supply already in inventory' };
+            }
+
+            const inventoryItem = new InventoryItem({
+                itemId: await generateId('INV', 4),
+                itemType: 'supply',
+                itemRef: supply._id,
+                stock: inventoryData.stock || 0,
+                unit: inventoryData.unit || supply.unit,
+                threshold: inventoryData.threshold || 100,
+                unitCost: inventoryData.unitCost || supply.unitCost,
+                notes: inventoryData.notes || '',
+                location: inventoryData.location || 'Warehouse A',
+                binLocation: inventoryData.binLocation || ''
+            });
+
+            await inventoryItem.save();
             
-            // Apply filters if provided
-            if (filters.itemType) {
-                query.itemType = filters.itemType === 'product' ? 'Product' : 'RawMaterial';
-            }
-            if (filters.lowStock === 'true') {
-                query.$expr = { $lte: ['$stock', '$lowStockThreshold'] };
-            }
-            if (filters.location) {
-                query.location = filters.location;
-            }
+            // Populate with specific model
+            await inventoryItem.populate({
+                path: 'itemRef',
+                model: 'Supply'
+            });
 
-            const items = await InventoryItem.find(query)
-                .populate('item')
-                .sort({ createdAt: -1 });
+            return {
+                success: true,
+                message: 'Supply added to inventory successfully',
+                data: inventoryItem
+            };
 
-            // Transform response to include type information
-            const transformedItems = items.map(item => ({
-                ...item.toObject(),
-                itemType: item.itemType === 'Product' ? 'product' : 'rawMaterial',
-                itemName: item.item?.name || item.item?.productId || item.item?.materialId,
-                itemCategory: item.item?.category
-            }));
-
-            return { success: true, data: transformedItems };
         } catch (error) {
-            console.error('Error fetching inventory items:', error);
+            console.error('Error adding supply to inventory:', error);
             throw error;
         }
     }
 
     // ─────────────────────────────────────────
-    // GET BY ID
+    // GET ALL INVENTORY ITEMS
     // ─────────────────────────────────────────
-    async getInventoryItemById(inventoryId) {
+    async getAllInventory() {
         try {
-            const item = await InventoryItem.findOne({ inventoryId })
-                .populate('item');
+            const items = await InventoryItem.find()
+                .sort({ createdAt: -1 });
+            
+            // Manually populate each item based on its type
+            const populatedItems = [];
+            for (const item of items) {
+                let populatedItem = item.toObject();
+                if (item.itemType === 'product') {
+                    const product = await Product.findById(item.itemRef);
+                    populatedItem.itemRef = product;
+                } else if (item.itemType === 'supply') {
+                    const supply = await Supply.findById(item.itemRef);
+                    populatedItem.itemRef = supply;
+                }
+                populatedItems.push(populatedItem);
+            }
+            
+            return { success: true, data: populatedItems };
+        } catch (error) {
+            console.error('Error fetching inventory:', error);
+            throw error;
+        }
+    }
 
+    // ─────────────────────────────────────────
+    // GET INVENTORY BY TYPE
+    // ─────────────────────────────────────────
+    async getInventoryByType(type) {
+        try {
+            const items = await InventoryItem.find({ itemType: type })
+                .sort({ createdAt: -1 });
+            
+            // Manually populate based on type
+            const populatedItems = [];
+            const modelToUse = type === 'product' ? Product : Supply;
+            
+            for (const item of items) {
+                let populatedItem = item.toObject();
+                const refItem = await modelToUse.findById(item.itemRef);
+                populatedItem.itemRef = refItem;
+                populatedItems.push(populatedItem);
+            }
+            
+            return { success: true, data: populatedItems };
+        } catch (error) {
+            console.error('Error fetching inventory by type:', error);
+            throw error;
+        }
+    }
+
+    // ─────────────────────────────────────────
+    // GET INVENTORY ITEM BY ID
+    // ─────────────────────────────────────────
+    async getInventoryById(itemId) {
+        try {
+            const item = await InventoryItem.findOne({ itemId });
+            
             if (!item) {
                 return { success: false, message: 'Inventory item not found' };
             }
-
-            const transformedItem = {
-                ...item.toObject(),
-                itemType: item.itemType === 'Product' ? 'product' : 'rawMaterial',
-                itemName: item.item?.name || item.item?.productId || item.item?.materialId,
-                itemCategory: item.item?.category
-            };
-
-            return { success: true, data: transformedItem };
+            
+            // Manually populate based on type
+            let populatedItem = item.toObject();
+            if (item.itemType === 'product') {
+                const product = await Product.findById(item.itemRef);
+                populatedItem.itemRef = product;
+            } else if (item.itemType === 'supply') {
+                const supply = await Supply.findById(item.itemRef);
+                populatedItem.itemRef = supply;
+            }
+            
+            return { success: true, data: populatedItem };
         } catch (error) {
             console.error('Error fetching inventory item:', error);
             throw error;
@@ -180,226 +186,95 @@ class InventoryItemService {
     }
 
     // ─────────────────────────────────────────
-    // GET BY PRODUCT
+    // UPDATE STOCK
     // ─────────────────────────────────────────
-    async getInventoryByProduct(productId) {
+    async updateStock(itemId, quantity, operation = 'set') {
         try {
-            const product = await Product.findOne({ productId });
-            if (!product) {
-                return { success: false, message: 'Product not found' };
-            }
-
-            const items = await InventoryItem.find({ 
-                item: product._id, 
-                itemType: 'Product' 
-            }).populate('item');
-
-            const transformedItems = items.map(item => ({
-                ...item.toObject(),
-                itemType: 'product',
-                itemName: item.item?.name
-            }));
-
-            return { success: true, data: transformedItems };
-        } catch (error) {
-            console.error('Error fetching inventory by product:', error);
-            throw error;
-        }
-    }
-
-    // ─────────────────────────────────────────
-    // GET BY RAW MATERIAL
-    // ─────────────────────────────────────────
-    async getInventoryByRawMaterial(materialId) {
-        try {
-            const rawMaterial = await RawMaterial.findOne({ materialId });
-            if (!rawMaterial) {
-                return { success: false, message: 'Raw material not found' };
-            }
-
-            const items = await InventoryItem.find({ 
-                item: rawMaterial._id, 
-                itemType: 'RawMaterial' 
-            }).populate('item');
-
-            const transformedItems = items.map(item => ({
-                ...item.toObject(),
-                itemType: 'rawMaterial',
-                itemName: item.item?.name
-            }));
-
-            return { success: true, data: transformedItems };
-        } catch (error) {
-            console.error('Error fetching inventory by raw material:', error);
-            throw error;
-        }
-    }
-
-    // ─────────────────────────────────────────
-    // GET LOW STOCK ITEMS
-    // ─────────────────────────────────────────
-    async getLowStockItems(itemType = null) {
-        try {
-            const query = {
-                $expr: { $lte: ['$stock', '$lowStockThreshold'] }
-            };
+            const inventoryItem = await InventoryItem.findOne({ itemId });
             
-            if (itemType) {
-                query.itemType = itemType === 'product' ? 'Product' : 'RawMaterial';
-            }
-            
-            const items = await InventoryItem.find(query).populate('item');
-
-            const transformedItems = items.map(item => ({
-                ...item.toObject(),
-                itemType: item.itemType === 'Product' ? 'product' : 'rawMaterial',
-                itemName: item.item?.name || item.item?.productId || item.item?.materialId,
-                shortageAmount: item.lowStockThreshold - item.stock
-            }));
-
-            return { success: true, data: transformedItems };
-        } catch (error) {
-            console.error('Error fetching low stock items:', error);
-            throw error;
-        }
-    }
-
-    // ─────────────────────────────────────────
-    // ADD STOCK
-    // ─────────────────────────────────────────
-    async addStock(inventoryId, quantity, notes = '') {
-        try {
-            if (quantity <= 0) {
-                return { success: false, message: 'Quantity must be greater than 0' };
-            }
-
-            const item = await InventoryItem.findOne({ inventoryId });
-            if (!item) {
+            if (!inventoryItem) {
                 return { success: false, message: 'Inventory item not found' };
             }
 
-            const oldStock = item.stock;
-            item.stock += quantity;
-            item.lastRestocked = new Date();
-            if (notes) item.notes = notes;
+            let newStock;
+            let newLastRestocked = inventoryItem.lastRestocked;
             
-            await item.save();
-            await item.populate('item');
-
-            // Update the source model's stock if needed
-            if (item.itemType === 'RawMaterial') {
-                await RawMaterial.findByIdAndUpdate(item.item._id, {
-                    $inc: { stock: quantity }
-                });
+            switch (operation) {
+                case 'add':
+                    newStock = inventoryItem.stock + quantity;
+                    newLastRestocked = new Date();
+                    break;
+                case 'subtract':
+                    newStock = Math.max(0, inventoryItem.stock - quantity);
+                    break;
+                default:
+                    newStock = quantity;
             }
 
-            const itemName = item.item?.name || item.item?.productId || item.item?.materialId;
+            const updatedItem = await InventoryItem.findOneAndUpdate(
+                { itemId },
+                { 
+                    stock: newStock,
+                    lastRestocked: newLastRestocked,
+                    updatedAt: new Date()
+                },
+                { new: true }
+            );
             
+            // Populate the result
+            let populatedItem = updatedItem.toObject();
+            if (updatedItem.itemType === 'product') {
+                const product = await Product.findById(updatedItem.itemRef);
+                populatedItem.itemRef = product;
+            } else if (updatedItem.itemType === 'supply') {
+                const supply = await Supply.findById(updatedItem.itemRef);
+                populatedItem.itemRef = supply;
+            }
+
             return {
                 success: true,
-                message: `Added ${quantity} ${item.unit} to ${itemName}`,
-                data: {
-                    ...item.toObject(),
-                    itemType: item.itemType === 'Product' ? 'product' : 'rawMaterial',
-                    previousStock: oldStock,
-                    newStock: item.stock,
-                    quantityAdded: quantity
-                }
+                message: `Stock updated successfully`,
+                data: populatedItem
             };
 
         } catch (error) {
-            console.error('Error adding stock:', error);
+            console.error('Error updating stock:', error);
             throw error;
         }
     }
 
     // ─────────────────────────────────────────
-    // DEDUCT STOCK
+    // UPDATE INVENTORY ITEM
     // ─────────────────────────────────────────
-    async deductStock(inventoryId, quantity, notes = '') {
+    async updateInventoryItem(itemId, payload) {
         try {
-            if (quantity <= 0) {
-                return { success: false, message: 'Quantity must be greater than 0' };
-            }
-
-            const item = await InventoryItem.findOne({ inventoryId });
-            if (!item) {
-                return { success: false, message: 'Inventory item not found' };
-            }
-
-            if (item.stock < quantity) {
-                return {
-                    success: false,
-                    message: `Insufficient stock. Available: ${item.stock} ${item.unit}, Requested: ${quantity}`,
-                    currentStock: item.stock,
-                    requestedQuantity: quantity
-                };
-            }
-
-            const oldStock = item.stock;
-            item.stock -= quantity;
-            if (notes) item.notes = notes;
-            
-            await item.save();
-            await item.populate('item');
-
-            // Update the source model's stock if needed
-            if (item.itemType === 'RawMaterial') {
-                await RawMaterial.findByIdAndUpdate(item.item._id, {
-                    $inc: { stock: -quantity }
-                });
-            }
-
-            const itemName = item.item?.name || item.item?.productId || item.item?.materialId;
-            const isLowStock = item.stock <= item.lowStockThreshold;
-            
-            return {
-                success: true,
-                message: `Deducted ${quantity} ${item.unit} from ${itemName}`,
-                data: {
-                    ...item.toObject(),
-                    itemType: item.itemType === 'Product' ? 'product' : 'rawMaterial',
-                    previousStock: oldStock,
-                    newStock: item.stock,
-                    quantityDeducted: quantity,
-                    isLowStock: isLowStock
-                }
-            };
-
-        } catch (error) {
-            console.error('Error deducting stock:', error);
-            throw error;
-        }
-    }
-
-    // ─────────────────────────────────────────
-    // UPDATE
-    // ─────────────────────────────────────────
-    async updateInventoryItem(inventoryId, payload) {
-        try {
-            // Prevent overwriting protected fields
-            const { inventoryId: _id, itemType, ...safePayload } = payload;
-            
-            // Don't allow changing critical fields
-            delete safePayload.inventoryId;
+            const { itemId: _id, ...updateData } = payload;
+            updateData.updatedAt = new Date();
 
             const item = await InventoryItem.findOneAndUpdate(
-                { inventoryId },
-                safePayload,
+                { itemId },
+                updateData,
                 { new: true, runValidators: true }
-            ).populate('item');
+            );
 
             if (!item) {
                 return { success: false, message: 'Inventory item not found' };
+            }
+            
+            // Populate the result
+            let populatedItem = item.toObject();
+            if (item.itemType === 'product') {
+                const product = await Product.findById(item.itemRef);
+                populatedItem.itemRef = product;
+            } else if (item.itemType === 'supply') {
+                const supply = await Supply.findById(item.itemRef);
+                populatedItem.itemRef = supply;
             }
 
             return {
                 success: true,
                 message: 'Inventory item updated successfully',
-                data: {
-                    ...item.toObject(),
-                    itemType: item.itemType === 'Product' ? 'product' : 'rawMaterial'
-                }
+                data: populatedItem
             };
 
         } catch (error) {
@@ -409,22 +284,17 @@ class InventoryItemService {
     }
 
     // ─────────────────────────────────────────
-    // DELETE
+    // DELETE INVENTORY ITEM
     // ─────────────────────────────────────────
-    async deleteInventoryItem(inventoryId) {
+    async deleteInventoryItem(itemId) {
         try {
-            const item = await InventoryItem.findOneAndDelete({ inventoryId });
-            
+            const item = await InventoryItem.findOneAndDelete({ itemId });
+
             if (!item) {
                 return { success: false, message: 'Inventory item not found' };
             }
 
-            return { 
-                success: true, 
-                message: 'Inventory item deleted successfully',
-                data: { inventoryId, itemType: item.itemType }
-            };
-
+            return { success: true, message: 'Inventory item deleted successfully' };
         } catch (error) {
             console.error('Error deleting inventory item:', error);
             throw error;
@@ -432,49 +302,96 @@ class InventoryItemService {
     }
 
     // ─────────────────────────────────────────
-    // GET INVENTORY SUMMARY
+    // GET LOW STOCK ITEMS
     // ─────────────────────────────────────────
-    async getInventorySummary() {
+    async getLowStockItems() {
+        try {
+            const items = await InventoryItem.find({ 
+                status: 'Low Stock',
+                stock: { $gt: 0 }
+            }).sort({ stock: 1 });
+            
+            // Populate results
+            const populatedItems = [];
+            for (const item of items) {
+                let populatedItem = item.toObject();
+                if (item.itemType === 'product') {
+                    const product = await Product.findById(item.itemRef);
+                    populatedItem.itemRef = product;
+                } else if (item.itemType === 'supply') {
+                    const supply = await Supply.findById(item.itemRef);
+                    populatedItem.itemRef = supply;
+                }
+                populatedItems.push(populatedItem);
+            }
+            
+            return { success: true, data: populatedItems };
+        } catch (error) {
+            console.error('Error fetching low stock items:', error);
+            throw error;
+        }
+    }
+
+    // ─────────────────────────────────────────
+    // GET OUT OF STOCK ITEMS
+    // ─────────────────────────────────────────
+    async getOutOfStockItems() {
+        try {
+            const items = await InventoryItem.find({ stock: 0 })
+                .sort({ createdAt: -1 });
+            
+            // Populate results
+            const populatedItems = [];
+            for (const item of items) {
+                let populatedItem = item.toObject();
+                if (item.itemType === 'product') {
+                    const product = await Product.findById(item.itemRef);
+                    populatedItem.itemRef = product;
+                } else if (item.itemType === 'supply') {
+                    const supply = await Supply.findById(item.itemRef);
+                    populatedItem.itemRef = supply;
+                }
+                populatedItems.push(populatedItem);
+            }
+            
+            return { success: true, data: populatedItems };
+        } catch (error) {
+            console.error('Error fetching out of stock items:', error);
+            throw error;
+        }
+    }
+
+    // ─────────────────────────────────────────
+    // GET STATISTICS
+    // ─────────────────────────────────────────
+    async getStatistics() {
         try {
             const totalItems = await InventoryItem.countDocuments();
-            const totalProducts = await InventoryItem.countDocuments({ itemType: 'Product' });
-            const totalRawMaterials = await InventoryItem.countDocuments({ itemType: 'RawMaterial' });
-            
-            const lowStockItems = await InventoryItem.countDocuments({
-                $expr: { $lte: ['$stock', '$lowStockThreshold'] }
-            });
-            
-            const lowStockProducts = await InventoryItem.countDocuments({
-                itemType: 'Product',
-                $expr: { $lte: ['$stock', '$lowStockThreshold'] }
-            });
-            
-            const lowStockRawMaterials = await InventoryItem.countDocuments({
-                itemType: 'RawMaterial',
-                $expr: { $lte: ['$stock', '$lowStockThreshold'] }
-            });
-            
-            const outOfStock = await InventoryItem.countDocuments({ stock: 0 });
+            const lowStockCount = await InventoryItem.countDocuments({ status: 'Low Stock' });
+            const outOfStockCount = await InventoryItem.countDocuments({ stock: 0 });
+            const totalValue = await InventoryItem.aggregate([
+                { $group: { _id: null, total: { $sum: { $multiply: ['$stock', '$unitCost'] } } } }
+            ]);
+
+            const productCount = await InventoryItem.countDocuments({ itemType: 'product' });
+            const supplyCount = await InventoryItem.countDocuments({ itemType: 'supply' });
 
             return {
                 success: true,
                 data: {
                     totalItems,
-                    totalProducts,
-                    totalRawMaterials,
-                    lowStockItems,
-                    lowStockProducts,
-                    lowStockRawMaterials,
-                    outOfStock,
-                    healthyStock: totalItems - lowStockItems
+                    productCount,
+                    supplyCount,
+                    lowStockCount,
+                    outOfStockCount,
+                    totalValue: totalValue[0]?.total || 0
                 }
             };
-
         } catch (error) {
-            console.error('Error getting inventory summary:', error);
+            console.error('Error fetching statistics:', error);
             throw error;
         }
     }
 }
 
-module.exports = new InventoryItemService();
+module.exports = new InventoryService();

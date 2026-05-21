@@ -2,54 +2,25 @@
 const mongoose = require('mongoose');
 
 const inventoryItemSchema = new mongoose.Schema({
-      
-    // For products - matches your database field
-    product: { 
-        type: mongoose.Schema.Types.ObjectId, 
-        ref: 'Product',
-        required: false 
-    },
+    itemId: { type: String, required: true, unique: true },
+    itemType: { type: String, enum: ['product', 'supply'], required: true },
+    itemRef: { type: mongoose.Schema.Types.ObjectId, required: true },
     
-    // For raw materials
-    itemType: { 
-        type: String, 
-        enum: ['RawMaterial'],
-        required: false 
-    },
-    item: { 
-        type: mongoose.Schema.Types.ObjectId, 
-        ref: 'RawMaterial',
-        required: false 
-    },
+    stock: { type: Number, required: true, default: 0, min: 0 },
+    unit: { type: String, default: 'piece' },
+    threshold: { type: Number, default: 100, min: 0 },
+    unitCost: { type: Number, default: 0 },
+    lastRestocked: { type: Date, default: Date.now },
+    notes: { type: String, default: '' },
+    status: { type: String, enum: ['In Stock', 'Low Stock', 'Out of Stock'], default: 'In Stock' },
     
-    // For products only
-    sizeLabel: { type: String },
+    location: { type: String, default: 'Warehouse A' },
+    binLocation: { type: String, default: '' },
+    batchNumber: { type: String, default: '' },
     
-    // Common fields
-    unit: { type: String, required: true, enum: ['pcs', 'liters', 'kg', 'grams', 'rolls', 'sheets'] },
-    stock: { type: Number, required: true, min: 0, default: 0 },
-    lowStockThreshold: { type: Number, default: 500 },
-    
-    // Additional metadata
-    notes: { type: String },
-    lastRestocked: { type: Date },
-    location: { type: String }
-}, { timestamps: true });
-
-// Update indexes to match your actual data structure
-// Index for products (using 'product' field)
-inventoryItemSchema.index({ product: 1, sizeLabel: 1 }, { 
-    unique: true,
-    partialFilterExpression: { sizeLabel: { $exists: true } }
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now }
 });
 
-// Index for raw materials (using 'item' field)
-inventoryItemSchema.index({ item: 1, itemType: 1 }, { 
-    unique: true,
-    partialFilterExpression: { sizeLabel: { $exists: false } }
-});
-
-// Index for inventoryId
-inventoryItemSchema.index({ inventoryId: 1 }, { unique: true });
 
 module.exports = mongoose.model('InventoryItem', inventoryItemSchema);

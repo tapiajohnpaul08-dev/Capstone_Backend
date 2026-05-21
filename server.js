@@ -5,8 +5,11 @@ const morgan = require('morgan');
 // const cookieParser = require('cookie-parser');
 const session = require('express-session'); // Add this
 const passport = require('./config/passport'); // Add this
+const path = require('path');
+
 
 require('dotenv').config();
+
 require('./config/db_config');
 
 const app = express();
@@ -42,15 +45,17 @@ app.use(helmet());
 app.use(morgan('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
 
 // ─────────────────────────────────────────
 // ROUTES
 // ─────────────────────────────────────────
 app.use('/api/v1/admin',     require('./routes/AdminRoutes'));
 app.use('/api/v1/customer',  require('./routes/CustomerRoutes'));
-app.use('/api/v1/product',   require('./routes/ProductRoutes')); 
+app.use('/api/v1/product',   require('./routes/ProductRoutes'));
+app.use('/api/v1/supplies',    require('./routes/SupplyRoutes')); 
 app.use('/api/v1/inventory', require('./routes/InventoryItemRoutes'));
-app.use('/api/v1/material',  require('./routes/RawMaterialRoutes'));
 app.use('/api/v1/order',     require('./routes/OrderRoutes')); // Added order routes
 
 app.use('/api/v1/otp', require('./routes/OtpRoutes'));
@@ -62,7 +67,7 @@ app.use('/api/v1/auth', require('./routes/OAuthRoutes'));
 // ─────────────────────────────────────────
 app.use((req, res) => {
     res.status(404).json({ success: false, message: `Route ${req.originalUrl} not found` });
-});
+}); 
 
 // ─────────────────────────────────────────
 // GLOBAL ERROR HANDLER

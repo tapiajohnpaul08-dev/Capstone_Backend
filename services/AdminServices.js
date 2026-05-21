@@ -104,7 +104,7 @@ class AdminService {
       return {
         success: true,
         message: "Login successful",
-        data: { admin: adminData.firstName, token },
+        data: { admin: adminData, token },
       };
     } catch (error) {
       console.error("Error logging in:", error);
@@ -118,7 +118,7 @@ class AdminService {
   async verifyToken(token) {
     try {
       const decoded = jwt.verify(token, JWT_SECRET);
-      console.log("Decoded token:", decoded);
+      console.log("Decoded token:", decoded.adminId);
       const admin = await Admin.findById(decoded.id).select("-password");
 
       if (!admin) {

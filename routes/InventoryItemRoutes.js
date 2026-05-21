@@ -1,23 +1,23 @@
+// routes/InventoryItemRoutes.js
 const express = require('express');
 const router = express.Router();
-const InventoryItemController = require('../controller/InventoryItemController');
+const InventoryController = require('../controller/InventoryItemController');
 const { verifyAdminToken } = require('../middleware/authMiddleware');
 
 // ─────────────────────────────────────────
-// ALL ROUTES — ADMIN PROTECTED
+// ADMIN ONLY ROUTES
 // ─────────────────────────────────────────
+router.get('/', verifyAdminToken, InventoryController.getAllInventory);
+router.get('/type/:type', verifyAdminToken, InventoryController.getInventoryByType);
+router.get('/low-stock', verifyAdminToken, InventoryController.getLowStockItems);
+router.get('/out-of-stock', verifyAdminToken, InventoryController.getOutOfStockItems);
+router.get('/statistics', verifyAdminToken, InventoryController.getStatistics);
+router.get('/:itemId', verifyAdminToken, InventoryController.getInventoryById);
 
-// NOTE: /low-stock must be defined before /:inventoryId
-// otherwise Express will treat "low-stock" as an inventoryId param
-router.get('/low-stock',                   verifyAdminToken, InventoryItemController.getLowStockItems);
-router.get('/product/:productId',          verifyAdminToken, InventoryItemController.getInventoryByProduct);
-
-router.get('/',                            verifyAdminToken, InventoryItemController.getAllInventoryItems);
-router.get('/:inventoryId',                verifyAdminToken, InventoryItemController.getInventoryItemById);
-router.post('/',                           verifyAdminToken, InventoryItemController.createInventoryItem);
-router.put('/:inventoryId',                verifyAdminToken, InventoryItemController.updateInventoryItem);
-router.patch('/:inventoryId/add',          verifyAdminToken, InventoryItemController.addStock);
-router.patch('/:inventoryId/deduct',       verifyAdminToken, InventoryItemController.deductStock);
-router.delete('/:inventoryId',             verifyAdminToken, InventoryItemController.deleteInventoryItem);
+router.post('/products/:productId', verifyAdminToken, InventoryController.addProductToInventory);
+router.post('/supplies/:supplyId', verifyAdminToken, InventoryController.addSupplyToInventory);
+router.put('/:itemId', verifyAdminToken, InventoryController.updateInventoryItem);
+router.patch('/:itemId/stock', verifyAdminToken, InventoryController.updateStock);
+router.delete('/:itemId', verifyAdminToken, InventoryController.deleteInventoryItem);
 
 module.exports = router;
