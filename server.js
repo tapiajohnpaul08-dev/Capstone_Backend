@@ -34,14 +34,38 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
-app.use(cors({
-    origin: true,
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
-}));
+app.use((req, res, next) => {
+  // Allow all origins in development
+  const allowedOrigins = ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:5174', 'http://127.0.0.1:5173'];
+  const origin = req.headers.origin;
+  
+  if (allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+  
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-HTTP-Method-Override');
+  res.header('Access-Control-Expose-Headers', 'Content-Length, X-Requested-With');
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
 // app.use(cookieParser());
-app.use(helmet());
+app.use(helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            imgSrc: ["'self'", "data:", "https:", "http:", "blob:"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+        },
+    },
+}));
 app.use(morgan('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -57,6 +81,7 @@ app.use('/api/v1/product',   require('./routes/ProductRoutes'));
 app.use('/api/v1/supplies',    require('./routes/SupplyRoutes')); 
 app.use('/api/v1/inventory', require('./routes/InventoryItemRoutes'));
 app.use('/api/v1/order',     require('./routes/OrderRoutes')); // Added order routes
+app.use('/api/v1/admin', require('./routes/DashboardRoutes')); // Added dashboard routes
 
 app.use('/api/v1/otp', require('./routes/OtpRoutes'));
 app.use('/api/v1/auth', require('./routes/OAuthRoutes'));

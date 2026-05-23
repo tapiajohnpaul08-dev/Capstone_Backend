@@ -1,5 +1,8 @@
 const Product = require('../models/Product.Model');
 const generateId = require('../utils/generateItemId');
+
+const InventoryItemService = require('./InventoryItemServices');
+
 const fs = require('fs');
 const path = require('path');
 
@@ -65,11 +68,20 @@ class ProductService {
 
             await newProduct.save();
 
-            return {
-                success: true,
-                message: 'Product created successfully',
-                data: newProduct
-            };
+           // ✅ Auto-add to inventory
+await InventoryItemService.addProductToInventory(productId, {
+    stock: 0,
+    unit: 'piece',
+    threshold: 100,
+    unitCost: processedSizes[0]?.price || 0,
+    location: 'Warehouse A'
+});
+
+return {
+    success: true,
+    message: 'Product created successfully',
+    data: newProduct
+};
 
         } catch (error) {
             console.error('Error creating product:', error);
@@ -97,7 +109,8 @@ class ProductService {
     async getProductById(id) {
         try {
             const product = await Product.findOne({ id });
-            
+            console.log('pr-id:', id);
+             
             if (!product) {
                 return { success: false, message: 'Product not found' };
             }

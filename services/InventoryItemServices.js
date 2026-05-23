@@ -304,34 +304,73 @@ class InventoryService {
     // ─────────────────────────────────────────
     // GET LOW STOCK ITEMS
     // ─────────────────────────────────────────
-    async getLowStockItems() {
-        try {
-            const items = await InventoryItem.find({ 
-                status: 'Low Stock',
-                stock: { $gt: 0 }
-            }).sort({ stock: 1 });
-            
-            // Populate results
-            const populatedItems = [];
-            for (const item of items) {
-                let populatedItem = item.toObject();
-                if (item.itemType === 'product') {
-                    const product = await Product.findById(item.itemRef);
-                    populatedItem.itemRef = product;
-                } else if (item.itemType === 'supply') {
-                    const supply = await Supply.findById(item.itemRef);
-                    populatedItem.itemRef = supply;
-                }
-                populatedItems.push(populatedItem);
-            }
-            
-            return { success: true, data: populatedItems };
-        } catch (error) {
-            console.error('Error fetching low stock items:', error);
-            throw error;
-        }
-    }
+async getLowStockItems() {
+    try {
+        const lowStockItems = [];
+        
+        // 1. Get low stock supplies from inventory (keep as is - working)
+        const supplies = await InventoryItem.find({ 
+            itemType: 'supply',
+            stock: { $gt: 0, $lt: 100 }
+        }).populate('itemRef');
 
+        for (const item of supplies) {
+            const supply = await Supply.findById(item.itemRef._id);
+            
+            lowStockItems.push({
+                itemId: item.itemId,
+                itemType: 'supply',
+                itemRef: {
+                    _id: item.itemRef?._id,
+                    supplyId: item.itemRef?.supplyId || supply?.supplyId,
+                    name: supply?.name || item.itemRef?.name || 'Unknown Supply',
+                    category: item.itemRef?.category || supply?.category,
+                    supplier: item.itemRef?.supplier || supply?.supplier,
+                    unit: item.unit || supply?.unit
+                },
+                stock: item.stock,
+                threshold: item.threshold || 100,
+                status: item.stock === 0 ? 'Out of Stock' : 'Low Stock'
+            });
+        }
+        
+        // 2. Get low stock products directly from Product model (MORE EFFICIENT)
+        const products = await Product.find({});
+        
+        for (const product of products) {
+            // Check each size for low stock
+            for (const size of product.sizes) {
+                if (size.stock > 0 && size.stock < 100) {
+                    lowStockItems.push({
+                        itemId: product.id,
+                        itemType: 'product',
+                        itemRef: {
+                            _id: product._id,
+                            id: product.id,
+                            name: product.name,
+                            category: product.category,
+                            subcategory: product.subcategory,
+                            image: product.image,
+                            sizeName: size.name,
+                            sizeStock: size.stock,
+                            sizePrice: size.price
+                        },
+                        stock: size.stock,
+                        threshold: 100,
+                        status: 'Low Stock'
+                    });
+                }
+            }
+        }
+        
+        console.log(`Found ${lowStockItems.length} low stock items (${lowStockItems.filter(i => i.itemType === 'supply').length} supplies, ${lowStockItems.filter(i => i.itemType === 'product').length} products)`);
+        
+        return { success: true, data: lowStockItems };
+    } catch (error) {
+        console.error('Error fetching low stock items:', error);
+        throw error;
+    }
+}
     // ─────────────────────────────────────────
     // GET OUT OF STOCK ITEMS
     // ─────────────────────────────────────────

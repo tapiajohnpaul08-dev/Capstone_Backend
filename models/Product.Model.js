@@ -17,7 +17,7 @@ const productSchema = new mongoose.Schema({
     id: { type: String, required: true, unique: true },
     name: { type: String, required: true },
     category: { type: String, required: true },
-    subcategory: { type: String, required: true },
+    subcategory: { type: String, default: '' },
     description: { type: String, default: '' },
     image: { type: String, required: true }, // Stores relative path like '/uploads/products/product-xxx.jpg'    
     sizes: [sizeSchema],

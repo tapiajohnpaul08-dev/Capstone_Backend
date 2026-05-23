@@ -42,7 +42,8 @@ class ProductController {
 
     // GET /api/v1/product/:id
     getProductById = asyncTryCatch(async (req, res, next) => {
-        const id = parseInt(req.params.id);
+        const id = req.params.id;
+        console.log('Controller - getProductById called with id:', id);
         const response = await productService.getProductById(id);
         const status = response.success ? 200 : 404;
         res.status(status).json(response);
