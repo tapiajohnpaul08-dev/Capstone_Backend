@@ -26,6 +26,7 @@ const productSchema = new mongoose.Schema({
     featured: { type: Boolean, default: false },
     popular: { type: Boolean, default: false },
     popularity: { type: Number, default: 0 },
+    revenue: { type: Number, default: 0 },
     
     isActive: { type: Boolean, default: true },
     

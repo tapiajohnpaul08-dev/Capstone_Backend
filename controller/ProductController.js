@@ -159,9 +159,8 @@ class ProductController {
         });
     });
 
-    // PATCH /api/v1/product/:id/size/:sizeName/stock
-updateSizeStock = asyncTryCatch(async (req, res, next) => {
-    const { id, sizeName } = req.params;
+   updateSizeStock = asyncTryCatch(async (req, res, next) => {
+    const { id, sizeName } = req.params;  
     const { stock } = req.body;
     const response = await productService.updateSizeStock(id, sizeName, stock);
     const status = response.success ? 200 : 404;
@@ -170,7 +169,7 @@ updateSizeStock = asyncTryCatch(async (req, res, next) => {
 
 // POST /api/v1/product/:id/size/:sizeName/reduce-stock
 reduceStock = asyncTryCatch(async (req, res, next) => {
-    const { id, sizeName } = req.params;
+    const { id, sizeName } = req.params;  // Don't use parseInt - keep as string
     const { quantity } = req.body;
     const response = await productService.reduceStock(id, sizeName, quantity);
     const status = response.success ? 200 : 400;

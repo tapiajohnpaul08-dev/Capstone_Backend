@@ -590,15 +590,26 @@ async updateProduct(id, payload, imageFile = null) {
         }
     }
 
-    // Add new method to update size stock
 async updateSizeStock(productId, sizeName, stock) {
     try {
+        console.log('productID', productId)
         const product = await Product.findOne({ id: productId });
+        
         if (!product) {
             return { success: false, message: 'Product not found' };
         }
         
-        await product.updateSizeStock(sizeName, stock);
+        // Find the size index
+        const sizeIndex = product.sizes.findIndex(s => s.name === sizeName);
+        if (sizeIndex === -1) {
+            return { success: false, message: `Size "${sizeName}" not found` };
+        }
+        
+        // Update the stock directly
+        product.sizes[sizeIndex].stock = Math.max(0, stock);
+        product.updatedAt = new Date();
+        
+        await product.save();
         
         return {
             success: true,
@@ -611,7 +622,7 @@ async updateSizeStock(productId, sizeName, stock) {
     }
 }
 
-// Add method to reduce stock on order
+// Reduce stock for a specific size
 async reduceStock(productId, sizeName, quantity) {
     try {
         const product = await Product.findOne({ id: productId });
@@ -619,7 +630,25 @@ async reduceStock(productId, sizeName, quantity) {
             return { success: false, message: 'Product not found' };
         }
         
-        await product.reduceStock(sizeName, quantity);
+        // Find the size index
+        const sizeIndex = product.sizes.findIndex(s => s.name === sizeName);
+        if (sizeIndex === -1) {
+            return { success: false, message: `Size "${sizeName}" not found` };
+        }
+        
+        const currentStock = product.sizes[sizeIndex].stock || 0;
+        if (currentStock < quantity) {
+            return { 
+                success: false, 
+                message: `Insufficient stock for size "${sizeName}". Available: ${currentStock}, Requested: ${quantity}`
+            };
+        }
+        
+        // Reduce the stock
+        product.sizes[sizeIndex].stock = currentStock - quantity;
+        product.updatedAt = new Date();
+        
+        await product.save();
         
         return {
             success: true,

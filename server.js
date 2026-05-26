@@ -84,6 +84,7 @@ app.use('/api/v1/order',     require('./routes/OrderRoutes')); // Added order ro
 app.use('/api/v1/admin', require('./routes/DashboardRoutes')); // Added dashboard routes
 app.use('/api/v1/analytics', require('./routes/AnalyticsRoutes')); // Added analytics routes
 app.use('/api/v1/otp', require('./routes/OtpRoutes'));
+app.use('/api/v1/alerts', require('./routes/AlertRoutes'));
 app.use('/api/v1/auth', require('./routes/OAuthRoutes'));
 
 
