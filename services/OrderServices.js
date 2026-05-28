@@ -8,14 +8,12 @@ class OrderService {
   // ─────────────────────────────────────────
   // CREATE ORDER (Supports both own cups and company products)
   // ─────────────────────────────────────────
+
   async createOrder(payload, user = null, userType = null) {
     try {
       console.log("\n=== 🔵 CREATE ORDER STARTED ===");
       console.log("Payload:", JSON.stringify(payload, null, 2));
-      console.log("User:", user ? user.email : "No user");
-      console.log("UserType:", userType);
 
-      // Determine who placed the order
       let orderedById;
       let customerEmail = payload.customerEmail;
       let customerName = payload.customerName;
@@ -26,224 +24,197 @@ class OrderService {
         customerEmail = customerEmail || user.email;
         customerName = customerName || user.name;
         customerPhone = customerPhone || user.phone;
-        console.log("Customer order from:", customerEmail);
-      } else if (user && userType === "admin") {
-        orderedById = user._id.toString();
-        if (!payload.customerEmail) {
-          return {
-            success: false,
-            message: "Customer email is required when creating order as admin",
-          };
-        }
-        console.log("Admin order for customer:", customerEmail);
-      } else {
-        // Guest order (no authentication)
-        if (!customerEmail) {
-          return {
-            success: false,
-            message: "Customer email is required for guest orders",
-          };
-        }
-        orderedById = null;
-        console.log("Guest order from:", customerEmail);
+      } else if (!customerEmail) {
+        return { success: false, message: "Customer email is required" };
       }
 
-      // Sanitize designDetails — supports:
-      //   • files as an array of objects: [{ name, size, type, path? }]
-      //   • files as a JSON string (sometimes sent by frontend): "[{...}]"
-      //   • imagePaths as an array of plain URL/path strings
-      const sanitizedDesignDetails = (payload.designDetails || []).map(detail => {
-        // Normalize files: parse if accidentally stringified
-        let rawFiles = detail.files || [];
-        if (typeof rawFiles === 'string') {
-          try { rawFiles = JSON.parse(rawFiles); } catch { rawFiles = []; }
-        }
-        const files = rawFiles.map(f => {
-          if (typeof f === 'string') {
-            // plain path string — store in path field
-            return { name: '', size: 0, type: '', path: f };
-          }
-          return {
-            name: f.name || '',
-            size: typeof f.size === 'number' ? f.size : 0,
-            type: f.type || '',
-            path: f.path || ''
-          };
-        });
+      // Handle Own Cups orders
+// Handle Own Cups orders
+if (payload.isProvided === true) {
+  // Get the first item from the items array
+  const firstItem = payload.items && payload.items.length > 0 ? payload.items[0] : {}
+  
+  const newOrder = new Order({
+    orderId: await generateId(),
+    customerName: customerName,
+    customerEmail: customerEmail,
+    customerPhone: customerPhone,
+    address: payload.address,
+    items: [{
+      productId: null,
+      name: firstItem.name || payload.productName || "Customer Provided Items",
+      category: "Customer Provided",
+      size: firstItem.size || payload.size || "Custom",
+      quantity: firstItem.quantity || payload.quantity,
+      designSource: firstItem.designSource || payload.designSource || "upload",
+      designImage: firstItem.designImage || payload.designImage || "",
+      printSize: firstItem.printSize || payload.printSize || "",
+      printPlacement: firstItem.printPlacement || payload.printPlacement || "",
+      designNotes: firstItem.designNotes || payload.designNotes || "",
+      files: firstItem.files || payload.files || [],
+      selectedTemplateId: firstItem.selectedTemplateId || null,
+      selectedTemplate: firstItem.selectedTemplate || null,
+      estimatedTotal: 0,
+    }],
+    quantity: firstItem.quantity || payload.quantity,
+    amount: payload.amount,
+    status: "Pending",
+    paymentStatus: "Unpaid",
+    receivingMode: payload.receivingMode,
+    expectedDelivery: this.calculateExpectedDelivery(payload.receivingMode),
+    isProvided: true,
+    orderedBy: orderedById,
+    notes: payload.notes || "Customer provided items for printing",
+    statusHistory: [{
+      status: "Pending",
+      timestamp: new Date(),
+      notes: "Order created (customer provided items)",
+      updatedBy: orderedById,
+    }],
+    customer: {
+      name: customerName,
+      email: customerEmail,
+      phone: customerPhone,
+      company: payload.customer?.company || '',
+    },
+    paymentMethod: payload.paymentMethod || 'cod',
+    paymentDetails: payload.paymentDetails || null,
+  });
+  
+  await newOrder.save();
+  return {
+    success: true,
+    message: "Order created successfully",
+    data: newOrder,
+  };
+}
 
-        // imagePaths: array of plain strings (saved design paths / URLs)
-        const imagePaths = (detail.imagePaths || []).filter(p => typeof p === 'string');
+      // Handle company products - always use items array
+      const processedItems = [];
+      let totalAmount = 0;
 
-        return {
-          designSource: detail.designSource,
-          printSize: detail.printSize,
-          printPlacement: detail.printPlacement,
-          designNotes: detail.designNotes,
-          selectedTemplateId: detail.selectedTemplateId || null,
-          selectedTemplate: detail.selectedTemplate || null,
-          files,
-          imagePaths
-        };
-      });
-      // Handle Own Cups orders (customer provides their own items)
-      if (payload.isProvided === true) {
-        console.log("📦 Processing OWN CUPS order");
-
-       
-
-        const newOrder = new Order({
-          orderId: await generateId(),
-          customerName: customerName,
-          customerEmail: customerEmail,
-          customerPhone: customerPhone,
-          address: payload.address,
-          productId: null,
-          productName: payload.productName || "Customer Provided Items",
-          size: payload.size || "Custom",
+      // Get items from payload (supports both single and multiple)
+      const itemsToProcess = payload.items || [
+        {
+          productId: payload.productId,
+          name: payload.productName,
+          category: payload.category,
+          size: payload.size,
           quantity: payload.quantity,
-          designDetails: sanitizedDesignDetails,
-          amount: payload.amount || 0,
-          status: "Pending",
-          paymentStatus: "Unpaid",
-          receivingMode: payload.receivingMode,
-          expectedDelivery: this.calculateExpectedDelivery(
-            payload.receivingMode,
-          ),
-          isProvided: true,
-          orderedBy: orderedById,
-          notes: payload.notes || "Customer provided items for printing",
-          statusHistory: [
-            {
-              status: "Pending",
-              timestamp: new Date(),
-              notes: "Order created (customer provided items)",
-              updatedBy: orderedById,
-            },
-          ],
+          designSource: payload.designSource || "upload",
+          printSize: payload.printSize || "",
+          printPlacement: payload.printPlacement || "",
+          designNotes: payload.designNotes || "",
+          files: payload.files || [],
+          selectedTemplate: payload.selectedTemplate || null, // ← ADD THIS
+          selectedTemplateId: payload.selectedTemplateId || null, // ← ADD THIS
+        },
+      ];
+
+      for (const item of itemsToProcess) {
+        const product = await Product.findOne({ id: item.productId });
+        if (!product) {
+          return { success: false, message: `Product not found: ${item.name}` };
+        }
+
+        const sizeObj = product.sizes.find((s) => s.name === item.size);
+        if (!sizeObj) {
+          return {
+            success: false,
+            message: `Size "${item.size}" not found for ${item.name}`,
+          };
+        }
+
+        if (sizeObj.stock < item.quantity) {
+          return {
+            success: false,
+            message: `Insufficient stock for ${item.name} - ${item.size}. Available: ${sizeObj.stock}`,
+          };
+        }
+
+        // Calculate price
+        let unitPrice = sizeObj.price;
+        const qty = item.quantity;
+        if (qty >= 5000 && sizeObj.bulkPrices?.[5000])
+          unitPrice = sizeObj.bulkPrices[5000] / 5000;
+        else if (qty >= 2000 && sizeObj.bulkPrices?.[2000])
+          unitPrice = sizeObj.bulkPrices[2000] / 2000;
+        else if (qty >= 1000 && sizeObj.bulkPrices?.[1000])
+          unitPrice = sizeObj.bulkPrices[1000] / 1000;
+        else if (qty >= 500 && sizeObj.bulkPrices?.[500])
+          unitPrice = sizeObj.bulkPrices[500] / 500;
+
+        const itemTotal = unitPrice * qty;
+        totalAmount += itemTotal;
+
+        processedItems.push({
+          productId: item.productId,
+          name: item.name,
+          category: product.category,
+          size: item.size,
+          quantity: item.quantity,
+          designSource: item.designSource || "upload",
+          designImage: item.designImage || "", // ← ADD THIS - Critical!
+          printSize: item.printSize || "",
+          printPlacement: item.printPlacement || "",
+          designNotes: item.designNotes || "",
+          files: item.files || [],
+          selectedTemplate: item.selectedTemplate || null, // ← ADD THIS
+          selectedTemplateId: item.selectedTemplateId || null, // ← ADD THIS
+          estimatedTotal: itemTotal,
+          image: product.image,
         });
 
-        await newOrder.save();
-        console.log("✅ Own cups order created:", newOrder.orderId);
-
-        return {
-          success: true,
-          message: "Order created successfully",
-          data: newOrder,
-        };
+        // Deduct stock
+        sizeObj.stock -= item.quantity;
+        await product.save();
       }
 
-      // Handle Company Products orders (we supply the products)
-      console.log("🏭 Processing COMPANY PRODUCT order");
-
-      // Find product - using 'id' field (your Product model uses 'id', not 'productId')
-      const product = await Product.findOne({ id: payload.productId });
-      if (!product) {
-        console.error("Product not found:", payload.productId);
-        return {
-          success: false,
-          message: `Product not found with ID: ${payload.productId}`,
-        };
-      }
-      console.log("Product found:", product.name);
-
-      // Validate size exists for the product
-      const sizeExists = product.sizes.some(
-        (s) => s.name.toLowerCase() === payload.size.toLowerCase(),
-      );
-      if (!sizeExists) {
-        const availableSizes = product.sizes.map((s) => s.name).join(", ");
-        return {
-          success: false,
-          message: `Size "${payload.size}" does not exist. Available sizes: ${availableSizes}`,
-        };
-      }
-      console.log("Size validated:", payload.size);
-
-      // Find inventory item for stock check
-      const inventory = await InventoryItem.findOne({
-        itemRef: product._id,
-        itemType: "product",
-      });
-
-      if (!inventory) {
-        return {
-          success: false,
-          message: `Inventory not found for ${product.name}. Please contact support.`,
-        };
-      }
-      // Find the specific size on the product
-      const sizeObj = product.sizes.find(
-        (s) => s.name.toLowerCase() === payload.size.toLowerCase(),
-      );
-
-      // Check stock on the size
-      if (sizeObj.stock < payload.quantity) {
-        return {
-          success: false,
-          message: `Insufficient stock. Available: ${sizeObj.stock}, Requested: ${payload.quantity}`,
-        };
-      }
-
-      // Deduct stock from the size on the Product model
-      const previousStock = sizeObj.stock;
-      sizeObj.stock -= payload.quantity;
-      await product.save();
-      console.log(`Stock deducted: ${previousStock} → ${sizeObj.stock}`);
-
-      // Create the order
       const newOrder = new Order({
         orderId: await generateId(),
         customerName: customerName,
         customerEmail: customerEmail,
         customerPhone: customerPhone,
         address: payload.address,
-        productId: payload.productId,
-        productName: product.name,
-        size: payload.size,
-        quantity: payload.quantity,
-        designDetails: sanitizedDesignDetails,
-        amount: payload.amount,
-        status: payload.status || "Pending",
-        paymentStatus: payload.paymentStatus || "Unpaid",
+        items: processedItems,
+        quantity: processedItems.reduce((sum, i) => sum + i.quantity, 0),
+        amount: totalAmount,
+        status: "Pending",
+        paymentStatus: "Unpaid",
         receivingMode: payload.receivingMode,
         expectedDelivery: this.calculateExpectedDelivery(payload.receivingMode),
         isProvided: false,
         orderedBy: orderedById,
-        notes: payload.notes || "",
+        notes: payload.notes || `Order with ${processedItems.length} item(s)`,
         statusHistory: [
           {
-            status: payload.status || "Pending",
+            status: "Pending",
             timestamp: new Date(),
-            notes: payload.notes || "Order created",
+            notes: "Order created",
             updatedBy: orderedById,
           },
         ],
+        customer: {
+          name: customerName,
+          email: customerEmail,
+          phone: customerPhone,
+          company: payload.customer?.company,
+        },
       });
 
       await newOrder.save();
-      console.log("✅ Company product order created:", newOrder.orderId);
+      console.log("✅ Order created:", newOrder.orderId);
 
       return {
         success: true,
         message: "Order created successfully",
-        data: {
-          ...newOrder.toObject(),
-          inventoryDetails: {
-            productName: product.name,
-            size: inventory.sizeLabel,
-            previousStock: previousStock,
-            newStock: inventory.stock,
-            deducted: payload.quantity,
-            inventoryId: inventory.itemId,
-          },
-        },
+        data: newOrder,
       };
     } catch (error) {
       console.error("❌ Error creating order:", error);
       throw error;
     }
   }
-
   // ─────────────────────────────────────────
   // CALCULATE EXPECTED DELIVERY DATE
   // ─────────────────────────────────────────
@@ -276,9 +247,15 @@ class OrderService {
   // ─────────────────────────────────────────
   // UPDATE ORDER STATUS (with inventory restoration on cancel)
   // ─────────────────────────────────────────
-  async updateOrderStatus(orderId, newStatus, notes = "", user = null) {
+  async updateOrderStatus(
+    orderId,
+    newStatus,
+    notes,
+    productionSchedule = null,
+    driverDetails = null,
+    user = null,
+  ) {
     try {
-
       console.log(`🔵 Updating order status for ${orderId} to ${newStatus}`);
       const validStatuses = [
         "Pending",
@@ -306,38 +283,74 @@ class OrderService {
         };
       }
 
+      // If status is changing to "Scheduled", save production schedule
+      if (newStatus === "Scheduled" && productionSchedule) {
+        order.productionSchedule = new Date(productionSchedule);
+      }
+
+      // If status is changing to "Out for Delivery" and has driver details
+      if (
+        newStatus === "Out for Delivery" &&
+        driverDetails &&
+        order.receivingMode === "Delivery"
+      ) {
+        order.driverDetails = {
+          driverName: driverDetails.driverName,
+          driverPhone: driverDetails.driverPhone,
+          plateNumber: driverDetails.plateNumber,
+          truckDescription: driverDetails.truckDescription,
+          assignedAt: new Date(),
+        };
+      }
+
       // If cancelling order, restore inventory (only for company products)
       if (
         newStatus === "Cancelled" &&
         order.status !== "Cancelled" &&
         !order.isProvided
       ) {
-        const product = await Product.findOne({ id: order.productId });
-        if (product) {
-          const inventory = await InventoryItem.findOne({
-            product: product._id,
-            sizeLabel: { $regex: new RegExp(`^${order.size}$`, "i") },
-          });
-
-          if (inventory) {
-            inventory.stock += order.quantity;
-            await inventory.save();
-            console.log(
-              `Inventory restored: +${order.quantity} to ${inventory.sizeLabel}`,
-            );
+        // Handle inventory restoration for multiple items
+        for (const item of order.items) {
+          if (item.productId) {
+            const product = await Product.findOne({ id: item.productId });
+            if (product) {
+              const sizeObj = product.sizes.find((s) => s.name === item.size);
+              if (sizeObj) {
+                sizeObj.stock += item.quantity;
+                await product.save();
+                console.log(
+                  `Inventory restored: +${item.quantity} to ${product.name} - ${item.size}`,
+                );
+              }
+            }
           }
         }
       }
 
       const oldStatus = order.status;
       order.status = newStatus;
-      order.statusHistory.push({
+
+      // Build status history entry
+      const historyEntry = {
         status: newStatus,
         timestamp: new Date(),
         notes: notes,
         updatedBy: user ? user._id.toString() : null,
-      });
+      };
+
+      // Add production schedule to history if provided
+      if (productionSchedule) {
+        historyEntry.productionSchedule = productionSchedule;
+      }
+
+      // Add driver details to history if provided
+      if (driverDetails && order.receivingMode === "Delivery") {
+        historyEntry.driverDetails = driverDetails;
+      }
+
+      order.statusHistory.push(historyEntry);
       order.updatedAt = new Date();
+
       if (user) {
         order.updatedBy = user._id.toString();
       }

@@ -1,4 +1,16 @@
+// models/Customer.Model.js
 const mongoose = require('mongoose');
+
+const designTemplateSchema = new mongoose.Schema({
+  templateId: { type: String, required: true, unique: true },
+  name: { type: String, required: true },
+  imagePath: { type: String, required: true },
+  printSize: { type: String, default: '' },
+  placement: { type: String, default: '' },
+  notes: { type: String, default: '' },
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now }
+});
 
 const customerSchema = new mongoose.Schema({
     customerId: {
@@ -27,14 +39,13 @@ const customerSchema = new mongoose.Schema({
         unique: true,
         index: true
     },
-    phone: { type: String, default: '' },  // ✅ Add this field
-
+    phone: { type: String, default: '' },
     email: {
         type: String,
         required: true,
         unique: true,
         trim: true,
-        lowecase: true,
+        lowercase: true,
         index: true
     },
     companyName:{
@@ -44,42 +55,20 @@ const customerSchema = new mongoose.Schema({
     password: {
         type: String,
     },
-    templateDesigns: [
-        {
-            logoImageUrl: {
-                type: String,
-                required: true,
-            },
-            printSize: {
-                type: String,
-                required: true,
-            },
-            placement: {
-                type: String,
-                required: true,
-            },
-            notes: {
-                type: String,
-                trim: true
-            },
-        },
-    ],
+    templateDesigns: [designTemplateSchema],
     orders: [
         {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Order'
         }
     ],  
-
-    // OAuth fields
     provider: { type: String, enum: ['google', 'facebook', 'local'], default: 'local' },
     providerId: { type: String, unique: true, sparse: true },
     profileImage: { type: String, default: null },
     isEmailVerified: { type: Boolean, default: false },
-
     createdAt: {
         type: Date,
-        default: Date.now,  // Real Date object, not a string
+        default: Date.now,
         immutable: true
     },
     updatedAt: {

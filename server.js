@@ -86,6 +86,7 @@ app.use('/api/v1/analytics', require('./routes/AnalyticsRoutes')); // Added anal
 app.use('/api/v1/otp', require('./routes/OtpRoutes'));
 app.use('/api/v1/alerts', require('./routes/AlertRoutes'));
 app.use('/api/v1/auth', require('./routes/OAuthRoutes'));
+app.use('/api/v1/designs', require('./routes/DesignRoutes')); // Added design routes
 
 
 // ─────────────────────────────────────────

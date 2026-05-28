@@ -134,23 +134,30 @@ class OrderController {
         res.status(status).json(response);
     });
 
-    updateOrderStatus = asyncTryCatch(async (req, res, next) => {
-        console.log('🔵 updateOrderStatus called');
-        const { orderId } = req.params;
-        const { status, notes } = req.body;
-        const user = req.admin;
-        
-        if (!status) {
-            return res.status(400).json({
-                success: false,
-                message: 'Status is required'
-            });
-        }
-        
-        const response = await orderService.updateOrderStatus(orderId, status, notes, user);
-        const statusCode = response.success ? 200 : 400;
-        res.status(statusCode).json(response);
-    });
+updateOrderStatus = asyncTryCatch(async (req, res, next) => {
+    console.log('🔵 updateOrderStatus called');
+    const { orderId } = req.params;
+    const { status, notes, productionSchedule, driverDetails } = req.body;
+    const user = req.admin;
+    
+    if (!status) {
+        return res.status(400).json({
+            success: false,
+            message: 'Status is required'
+        });
+    }
+    
+    const response = await orderService.updateOrderStatus(
+        orderId, 
+        status, 
+        notes, 
+        productionSchedule, 
+        driverDetails, 
+        user
+    );
+    const statusCode = response.success ? 200 : 400;
+    res.status(statusCode).json(response);
+});
 
     updatePaymentStatus = asyncTryCatch(async (req, res, next) => {
         console.log('🔵 updatePaymentStatus called');
