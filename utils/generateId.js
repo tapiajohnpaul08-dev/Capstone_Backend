@@ -1,11 +1,11 @@
-const generateUniversalId = async () => {
+const generateUniversalId = async (prefix) => {
     try {
       const chars = '0123456789';
       let id = '';
-      for (let i = 0; i < 10; i++) {
+      for (let i = 0; i < 4; i++) {
         id += chars[Math.floor(Math.random() * chars.length)];
       }
-      return id;
+      return `${prefix}-${id}`;
     } catch (error) {
       return error;
     }

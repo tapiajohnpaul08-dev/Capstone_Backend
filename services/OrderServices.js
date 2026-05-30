@@ -2,7 +2,7 @@
 const Order = require("../models/Order.Model");
 const InventoryItem = require("../models/InventoryItem.Model");
 const Product = require("../models/Product.Model");
-const generateId = require("../utils/generateId");
+const generateId = require('../utils/generateItemId');
 
 class OrderService {
   // ─────────────────────────────────────────
@@ -35,7 +35,7 @@ if (payload.isProvided === true) {
   const firstItem = payload.items && payload.items.length > 0 ? payload.items[0] : {}
   
   const newOrder = new Order({
-    orderId: await generateId(),
+    orderId: await generateId('ORD'),
     customerName: customerName,
     customerEmail: customerEmail,
     customerPhone: customerPhone,

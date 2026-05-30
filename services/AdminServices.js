@@ -32,7 +32,7 @@ class AdminService {
       const hashedPassword = await bcrypt.hash(payload.password, salt);
 
       const newAdmin = new Admin({
-        adminId: await generateId(),
+        adminId: await generateId('ADM'),
         firstName: payload.firstName,
         middleName: payload.middleName || "",
         lastName: payload.lastName,

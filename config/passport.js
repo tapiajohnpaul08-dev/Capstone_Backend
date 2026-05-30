@@ -80,7 +80,7 @@ const findOrCreateUser = async (profile, provider) => {
     }
     
     const newUser = new Customer({
-        customerId: await generateId(),
+        customerId: await generateId('CUST'),
         firstName: firstName,
         lastName: lastName,
         username: `${firstName}_${providerId.substring(0, 8)}`,

@@ -58,9 +58,11 @@ async register(payload, otp) {
             };
         }
 
+       
+        
         // Log the data being saved
         const customerData = {
-            customerId: await generateId(),
+            customerId: await generateId('CUST'),
             firstName: payload.firstName,
             middleName: payload.middleName || '',
             lastName: payload.lastName,

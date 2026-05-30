@@ -5,18 +5,37 @@ const generateId = async (prefix = 'PRD', padding = 3) => {
     const random = Math.floor(Math.random() * Math.pow(10, padding)).toString().padStart(padding, '0');
     const timestamp = Date.now().toString().slice(-4);
     
-    if (prefix === 'INV') {
-        return `${prefix}-${random}${timestamp}`;
+    // Handle different prefixes
+    switch(prefix) {
+        case 'INV': // Inventory
+            return `${prefix}-${random}${timestamp}`;
+        case 'SUP': // Supply
+            return `${prefix}-${year}-${random}`;
+        case 'ORD': // Order
+            return `${prefix}-${year}${random}${timestamp}`;
+        case 'PRD': // Products
+        default:
+            return `${prefix}-${year}-${random}`;
     }
-    
-    return `${prefix}-${year}-${random}`;
 };
 
 // Synchronous version for simple cases
 const generateIdSync = (prefix = 'PRD', padding = 3) => {
     const year = new Date().getFullYear();
     const random = Math.floor(Math.random() * Math.pow(10, padding)).toString().padStart(padding, '0');
-    return `${prefix}-${year}-${random}`;
+    const timestamp = Date.now().toString().slice(-4);
+    
+    switch(prefix) {
+        case 'INV': // Inventory
+            return `${prefix}-${random}${timestamp}`;
+        case 'SUP': // Supply
+            return `${prefix}-${year}-${random}`;
+        case 'ORD': // Order
+            return `${prefix}-${year}${random}${timestamp}`;
+        case 'PRD': // Products
+        default:
+            return `${prefix}-${year}-${random}`;
+    }
 };
 
 module.exports = generateId;
