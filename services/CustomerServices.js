@@ -1,326 +1,441 @@
-const Customer = require('../models/Customer.Model');
-const BlacklistToken = require('../models/BlacklistToken'); // Add this
-const generateId = require('../utils/generateId');
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
+const Customer = require("../models/Customer.Model");
+const BlacklistToken = require("../models/BlacklistToken"); // Add this
+const generateId = require("../utils/generateId");
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
 
-const { verifyOtp } = require('../utils/otpUtils'); // Add this import
-
+const { verifyOtp } = require("../utils/otpUtils"); // Add this import
 
 const JWT_SECRET = process.env.JWT_SECRET;
-const JWT_EXPIRES_IN = '24h';
+const JWT_EXPIRES_IN = "24h";
 
 class CustomerService {
-
-    // ─────────────────────────────────────────
-    // REGISTER
-    // ─────────────────────────────────────────
-    // Update the register method to properly validate OTP
-async register(payload, otp) {
+  // ─────────────────────────────────────────
+  // REGISTER
+  // ─────────────────────────────────────────
+  // Update the register method to properly validate OTP
+  async register(payload, otp) {
     try {
-        console.log('=== REGISTER DEBUG ===');
-        console.log('Received payload:', JSON.stringify(payload, null, 2));
-        console.log('Received OTP:', otp);
-        
-        // Check if OTP is provided
-        if (!otp) {
-            console.log('No OTP provided');
-            return {
-                success: false,
-                message: 'OTP is required. Please request an OTP first.'
-            };
-        }
-        
-        // Verify OTP
-        const otpVerification = await verifyOtp(payload.email, otp);
-        console.log('OTP verification result:', otpVerification);
-        
-        if (!otpVerification.success) {
-            return {
-                success: false,
-                message: otpVerification.message
-            };
-        }
+      console.log("=== REGISTER DEBUG ===");
+      console.log("Received payload:", JSON.stringify(payload, null, 2));
+      console.log("Received OTP:", otp);
 
-        // Check if customer already exists
-        const existingCustomer = await Customer.findOne({
-            $or: [
-                { email: payload.email.toLowerCase() },
-                { username: payload.username }
-            ]
-        });
-
-        if (existingCustomer) {
-            console.log('Customer already exists:', existingCustomer.email);
-            return {
-                success: false,
-                message: 'A customer with this email or username already exists'
-            };
-        }
-
-       
-        
-        // Log the data being saved
-        const customerData = {
-            customerId: await generateId('CUST'),
-            firstName: payload.firstName,
-            middleName: payload.middleName || '',
-            lastName: payload.lastName,
-            username: payload.username,
-            email: payload.email.toLowerCase(),
-            phone: payload.phone || '',
-            companyName: payload.companyName || null,
-            password: await bcrypt.hash(payload.password, await bcrypt.genSalt(10))
-        };
-        
-        console.log('Creating customer with data:', JSON.stringify(customerData, null, 2));
-
-        const newCustomer = new Customer(customerData);
-        await newCustomer.save();
-
-        const savedCustomer = newCustomer.toObject();
-        delete savedCustomer.password;
-
+      // Check if OTP is provided
+      if (!otp) {
+        console.log("No OTP provided");
         return {
-            success: true,
-            message: 'Customer registered successfully',
-            data: savedCustomer
+          success: false,
+          message: "OTP is required. Please request an OTP first.",
         };
+      }
 
+      // Verify OTP
+      const otpVerification = await verifyOtp(payload.email, otp);
+      console.log("OTP verification result:", otpVerification);
+
+      if (!otpVerification.success) {
+        return {
+          success: false,
+          message: otpVerification.message,
+        };
+      }
+
+      // Check if customer already exists
+      const existingCustomer = await Customer.findOne({
+        $or: [
+          { email: payload.email.toLowerCase() },
+          { username: payload.username },
+        ],
+      });
+
+      if (existingCustomer) {
+        console.log("Customer already exists:", existingCustomer.email);
+        return {
+          success: false,
+          message: "A customer with this email or username already exists",
+        };
+      }
+
+      // Log the data being saved
+      const customerData = {
+        customerId: await generateId("CUST"),
+        firstName: payload.firstName,
+        middleName: payload.middleName || "",
+        lastName: payload.lastName,
+        username: payload.username,
+        email: payload.email.toLowerCase(),
+        phone: payload.phone || "",
+        companyName: payload.companyName || null,
+        password: await bcrypt.hash(payload.password, await bcrypt.genSalt(10)),
+        templateDesigns: [], // Explicitly set to empty array
+        provider: 'local'
+
+      };
+
+      console.log(
+        "Creating customer with data:",
+        JSON.stringify(customerData, null, 2),
+      );
+
+      const newCustomer = new Customer(customerData);
+      await newCustomer.save();
+
+      const savedCustomer = newCustomer.toObject();
+      delete savedCustomer.password;
+
+      return {
+        success: true,
+        message: "Customer registered successfully",
+        data: savedCustomer,
+      };
     } catch (error) {
-        console.error('Error registering customer:', error);
-        // Log the full error details
-        if (error.code === 11000) {
-            console.error('Duplicate key error:', error.keyPattern, error.keyValue);
-        }
-        throw error;
+      console.error("Error registering customer:", error);
+      // Log the full error details
+      if (error.code === 11000) {
+        console.error("Duplicate key error:", error.keyPattern, error.keyValue);
+      }
+      throw error;
     }
-}
+  }
 
-    // ─────────────────────────────────────────
-    // LOGIN
-    // ─────────────────────────────────────────
-    async login(payload) {
-        try {
-            const { email, password } = payload;
-            const customer = await Customer.findOne({ email: email.toLowerCase() });
+  // ─────────────────────────────────────────
+  // LOGIN
+  // ─────────────────────────────────────────
+  async login(payload) {
+    try {
+      const { email, password } = payload;
+      const customer = await Customer.findOne({ email: email.toLowerCase() });
 
-            if (!customer) {
-                return {
-                    success: false,
-                    message: 'Invalid email or password'
-                };
-            }
+      if (!customer) {
+        return {
+          success: false,
+          message: "Invalid email or password",
+        };
+      }
 
-            const isPasswordValid = await bcrypt.compare(password, customer.password);
+      const isPasswordValid = await bcrypt.compare(password, customer.password);
 
-            if (!isPasswordValid) {
-                return {
-                    success: false,
-                    message: 'Invalid email or password'
-                };
-            }
+      if (!isPasswordValid) {
+        return {
+          success: false,
+          message: "Invalid email or password",
+        };
+      }
 
-            const token = jwt.sign(
-                {
-                    id: customer._id,
-                    customerId: customer.customerId,
-                    email: customer.email,
-                    userName: customer.userName,
-                },
-                JWT_SECRET,
-                { expiresIn: JWT_EXPIRES_IN }
-            );
+      const token = jwt.sign(
+        {
+          id: customer._id,
+          customerId: customer.customerId,
+          email: customer.email,
+          userName: customer.userName,
+        },
+        JWT_SECRET,
+        { expiresIn: JWT_EXPIRES_IN },
+      );
 
-            const customerData = customer.toObject();
-            delete customerData.password;
+      const customerData = customer.toObject();
+      delete customerData.password;
 
-            return {
-                success: true,
-                message: 'Login successful',
-                data: { customer: customerData, token }
-            };
-
-        } catch (error) {
-            console.error('Error logging in customer:', error);
-            throw error;
-        }
+      return {
+        success: true,
+        message: "Login successful",
+        data: { customer: customerData, token },
+      };
+    } catch (error) {
+      console.error("Error logging in customer:", error);
+      throw error;
     }
+  }
 
-async logout(token) {
-        try {
-            if (!token) {
-                return {
-                    success: false,
-                    message: 'No token provided'
-                };
-            }
+  async logout(token) {
+    try {
+      if (!token) {
+        return {
+          success: false,
+          message: "No token provided",
+        };
+      }
 
-            // Verify token to get expiry
-            const decoded = jwt.verify(token, JWT_SECRET);
-            
-            // Add token to blacklist
-            await BlacklistToken.create({
-                token: token,
-                expiresAt: new Date(decoded.exp * 1000) // Convert to milliseconds
-            });
+      // Verify token to get expiry
+      const decoded = jwt.verify(token, JWT_SECRET);
 
-            console.log('Token blacklisted successfully');
+      // Add token to blacklist
+      await BlacklistToken.create({
+        token: token,
+        expiresAt: new Date(decoded.exp * 1000), // Convert to milliseconds
+      });
 
-            return {
-                success: true,
-                message: 'Logged out successfully'
-            };
-            
-        } catch (error) {
-            console.error('Error during logout:', error);
-            throw error;
-        }
+      console.log("Token blacklisted successfully");
+
+      return {
+        success: true,
+        message: "Logged out successfully",
+      };
+    } catch (error) {
+      console.error("Error during logout:", error);
+      throw error;
     }
+  }
 
-    // ─────────────────────────────────────────
-    // VERIFY TOKEN
-    // ─────────────────────────────────────────
-     async verifyToken(token) {
-        try {
-            if (!token) {
-                return { success: false, message: 'No token provided' };
-            }
+  // ─────────────────────────────────────────
+  // VERIFY TOKEN
+  // ─────────────────────────────────────────
+  async verifyToken(token) {
+    try {
+      if (!token) {
+        return { success: false, message: "No token provided" };
+      }
 
-            // Check if token is blacklisted
-            const isBlacklisted = await BlacklistToken.findOne({ token });
-            
-            if (isBlacklisted) {
-                return { 
-                    success: false, 
-                    message: 'Token has been invalidated. Please login again.' 
-                };
-            }
+      // Check if token is blacklisted
+      const isBlacklisted = await BlacklistToken.findOne({ token });
 
-            // Verify JWT token
-            const decoded = jwt.verify(token, JWT_SECRET);
-            
-            const customer = await Customer.findById(decoded.id).select('-password');
+      if (isBlacklisted) {
+        return {
+          success: false,
+          message: "Token has been invalidated. Please login again.",
+        };
+      }
 
-            if (!customer) {
-                return { success: false, message: 'Customer not found' };
-            }
+      // Verify JWT token
+      const decoded = jwt.verify(token, JWT_SECRET);
 
-            return { success: true, data: customer };
+      const customer = await Customer.findById(decoded.id).select("-password");
 
-        } catch (error) {
-            if (error.name === 'TokenExpiredError') {
-                return { success: false, message: 'Token has expired' };
-            }
-            if (error.name === 'JsonWebTokenError') {
-                return { success: false, message: 'Invalid token' };
-            }
-            console.error('Error verifying token:', error);
-            throw error;
-        }
+      if (!customer) {
+        return { success: false, message: "Customer not found" };
+      }
+
+      return { success: true, data: customer };
+    } catch (error) {
+      if (error.name === "TokenExpiredError") {
+        return { success: false, message: "Token has expired" };
+      }
+      if (error.name === "JsonWebTokenError") {
+        return { success: false, message: "Invalid token" };
+      }
+      console.error("Error verifying token:", error);
+      throw error;
     }
+  }
 
-    
+  // ─────────────────────────────────────────
+  // GET BY ID
+  // ─────────────────────────────────────────
+  async getCustomerById(customerId) {
+    try {
+      const customer = await Customer.findOne({ customerId }).select(
+        "-password",
+      );
 
-    // ─────────────────────────────────────────
-    // GET BY ID
-    // ─────────────────────────────────────────
-    async getCustomerById(customerId) {
-        try {
-            const customer = await Customer.findOne({ customerId }).select('-password');
+      if (!customer) {
+        return { success: false, message: "Customer not found" };
+      }
 
-            if (!customer) {
-                return { success: false, message: 'Customer not found' };
-            }
-
-            return { success: true, data: customer };
-        } catch (error) {
-            console.error('Error fetching customer:', error);
-            throw error;
-        }
+      return { success: true, data: customer };
+    } catch (error) {
+      console.error("Error fetching customer:", error);
+      throw error;
     }
+  }
 
-    // ─────────────────────────────────────────
-    // UPDATE
-    // ─────────────────────────────────────────
-    async updateCustomer(customerId, payload) {
-        try {
-            // Prevent updating sensitive fields directly
-            const { password, customerId: _id, ...safePayload } = payload;
+  // ─────────────────────────────────────────
+  // UPDATE
+  // ─────────────────────────────────────────
+  async updateCustomer(customerId, payload) {
+    try {
+      // Prevent updating sensitive fields directly
+      const { password, customerId: _id, ...safePayload } = payload;
 
-            const customer = await Customer.findOneAndUpdate(
-                { customerId },
-                safePayload,
-                { new: true, runValidators: true }
-            ).select('-password');
+      const customer = await Customer.findOneAndUpdate(
+        { customerId },
+        safePayload,
+        { new: true, runValidators: true },
+      ).select("-password");
 
-            if (!customer) {
-                return { success: false, message: 'Customer not found' };
-            }
+      if (!customer) {
+        return { success: false, message: "Customer not found" };
+      }
 
-            return {
-                success: true,
-                message: 'Customer updated successfully',
-                data: customer
-            };
-
-        } catch (error) {
-            console.error('Error updating customer:', error);
-            throw error;
-        }
+      return {
+        success: true,
+        message: "Customer updated successfully",
+        data: customer,
+      };
+    } catch (error) {
+      console.error("Error updating customer:", error);
+      throw error;
     }
+  }
 
-    // ─────────────────────────────────────────
-    // CHANGE PASSWORD
-    // ─────────────────────────────────────────
-    async changePassword(customerId, payload) {
-        try {
-            const { currentPassword, newPassword } = payload;
+  // ─────────────────────────────────────────
+  // CHANGE PASSWORD
+  // ─────────────────────────────────────────
+  async changePassword(customerId, payload) {
+    try {
+      const { currentPassword, newPassword } = payload;
 
-            const customer = await Customer.findOne({ customerId });
+      const customer = await Customer.findOne({ customerId });
 
-            if (!customer) {
-                return { success: false, message: 'Customer not found' };
-            }
+      if (!customer) {
+        return { success: false, message: "Customer not found" };
+      }
 
-            const isPasswordValid = await bcrypt.compare(currentPassword, customer.password);
+      const isPasswordValid = await bcrypt.compare(
+        currentPassword,
+        customer.password,
+      );
 
-            if (!isPasswordValid) {
-                return { success: false, message: 'Current password is incorrect' };
-            }
+      if (!isPasswordValid) {
+        return { success: false, message: "Current password is incorrect" };
+      }
 
-            const salt = await bcrypt.genSalt(10);
-            customer.password = await bcrypt.hash(newPassword, salt);
-            await customer.save();
+      const salt = await bcrypt.genSalt(10);
+      customer.password = await bcrypt.hash(newPassword, salt);
+      await customer.save();
 
-            return { success: true, message: 'Password changed successfully' };
-
-        } catch (error) {
-            console.error('Error changing password:', error);
-            throw error;
-        }
+      return { success: true, message: "Password changed successfully" };
+    } catch (error) {
+      console.error("Error changing password:", error);
+      throw error;
     }
+  }
 
-    // ─────────────────────────────────────────
-    // DELETE
-    // ─────────────────────────────────────────
-    async deleteCustomer(customerId) {
-        try {
-            const customer = await Customer.findOneAndDelete({ customerId });
+  async requestPasswordChangeOtp(email) {
+    try {
+      const customer = await Customer.findOne({ email: email.toLowerCase() });
 
-            if (!customer) {
-                return { success: false, message: 'Customer not found' };
-            }
+      if (!customer) {
+        return {
+          success: false,
+          message: "Customer not found",
+        };
+      }
 
-            return { success: true, message: 'Customer deleted successfully' };
+      // Check if customer has a password (local account)
+      const hasPassword = customer.password && customer.password.length > 0;
 
-        } catch (error) {
-            console.error('Error deleting customer:', error);
-            throw error;
-        }
+      // Send OTP using the otpUtils
+      const { sendOtp } = require("../utils/otpUtils");
+      const result = await sendOtp(email);
+
+      if (!result.success) {
+        return result;
+      }
+
+      return {
+        success: true,
+        message: "OTP sent to your email",
+        data: {
+          hasPassword: hasPassword,
+          provider: customer.provider || "local",
+        },
+      };
+    } catch (error) {
+      console.error("Error requesting password change OTP:", error);
+      throw error;
     }
+  }
 
+  // ─────────────────────────────────────────
+  // UPDATE PASSWORD WITH OTP VERIFICATION
+  // ─────────────────────────────────────────
+  async updatePasswordWithOtp(email, otp, newPassword) {
+    try {
+      // Verify OTP first
+      const { verifyOtp } = require("../utils/otpUtils");
+      const otpVerification = await verifyOtp(email, otp);
 
+      if (!otpVerification.success) {
+        return {
+          success: false,
+          message: otpVerification.message,
+        };
+      }
+
+      // Find customer
+      const customer = await Customer.findOne({ email: email.toLowerCase() });
+
+      if (!customer) {
+        return {
+          success: false,
+          message: "Customer not found",
+        };
+      }
+
+      // Hash new password
+      const salt = await bcrypt.genSalt(10);
+      customer.password = await bcrypt.hash(newPassword, salt);
+
+    //   // If provider is OAuth (google/facebook), update provider to 'local'
+    //   if (customer.provider && customer.provider !== "local") {
+    //     customer.provider = "local";
+    //   }
+
+      await customer.save();
+
+      // Clear OTP after successful password update
+      // The verifyOtp function already deletes or marks the OTP as used
+
+      return {
+        success: true,
+        message: "Password updated successfully",
+      };
+    } catch (error) {
+      console.error("Error updating password with OTP:", error);
+      throw error;
+    }
+  }
+
+  // ─────────────────────────────────────────
+  // UPDATE PASSWORD WITH CURRENT PASSWORD
+  // ─────────────────────────────────────────
+  async updatePasswordWithCurrent(customerId, currentPassword, newPassword) {
+    try {
+      const customer = await Customer.findOne({ customerId });
+
+      if (!customer) {
+        return { success: false, message: "Customer not found" };
+      }
+
+      // Verify current password
+      const isPasswordValid = await bcrypt.compare(
+        currentPassword,
+        customer.password,
+      );
+
+      if (!isPasswordValid) {
+        return { success: false, message: "Current password is incorrect" };
+      }
+
+      // Hash new password
+      const salt = await bcrypt.genSalt(10);
+      customer.password = await bcrypt.hash(newPassword, salt);
+      await customer.save();
+
+      return { success: true, message: "Password updated successfully" };
+    } catch (error) {
+      console.error("Error updating password:", error);
+      throw error;
+    }
+  }
+
+  // ─────────────────────────────────────────
+  // DELETE
+  // ─────────────────────────────────────────
+  async deleteCustomer(customerId) {
+    try {
+      const customer = await Customer.findOneAndDelete({ customerId });
+
+      if (!customer) {
+        return { success: false, message: "Customer not found" };
+      }
+
+      return { success: true, message: "Customer deleted successfully" };
+    } catch (error) {
+      console.error("Error deleting customer:", error);
+      throw error;
+    }
+  }
 }
 
 module.exports = new CustomerService();

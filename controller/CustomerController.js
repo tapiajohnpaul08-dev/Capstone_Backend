@@ -111,9 +111,60 @@ class CustomerController {
         res.status(status).json(response);
     });
 
-    // PUT /api/v1/customer/:customerId/password
+    // PUT /api/v1/customer/:customerId/password (old method - keep for backward compatibility)
     changePassword = asyncTryCatch(async (req, res, next) => {
         const response = await customerService.changePassword(req.params.customerId, req.body);
+        const status = response.success ? 200 : 400;
+        res.status(status).json(response);
+    });
+
+    // POST /api/v1/customer/request-password-otp
+    requestPasswordChangeOtp = asyncTryCatch(async (req, res, next) => {
+        // Get email from authenticated user or request body
+        const email = req.customer?.email || req.body.email;
+        
+        if (!email) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email is required'
+            });
+        }
+        
+        const response = await customerService.requestPasswordChangeOtp(email);
+        const status = response.success ? 200 : 400;
+        res.status(status).json(response);
+    });
+
+    // POST /api/v1/customer/update-password-with-otp
+    updatePasswordWithOtp = asyncTryCatch(async (req, res, next) => {
+        const email = req.customer?.email || req.body.email;
+        const { otp, newPassword } = req.body;
+        
+        if (!email || !otp || !newPassword) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email, OTP, and new password are required'
+            });
+        }
+        
+        const response = await customerService.updatePasswordWithOtp(email, otp, newPassword);
+        const status = response.success ? 200 : 400;
+        res.status(status).json(response);
+    });
+
+    // PUT /api/v1/customer/update-password-with-current/:customerId
+    updatePasswordWithCurrent = asyncTryCatch(async (req, res, next) => {
+        const { customerId } = req.params;
+        const { currentPassword, newPassword } = req.body;
+        
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({
+                success: false,
+                message: 'Current password and new password are required'
+            });
+        }
+        
+        const response = await customerService.updatePasswordWithCurrent(customerId, currentPassword, newPassword);
         const status = response.success ? 200 : 400;
         res.status(status).json(response);
     });

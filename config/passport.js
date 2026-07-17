@@ -89,7 +89,8 @@ const findOrCreateUser = async (profile, provider) => {
         providerId: providerId,
         profileImage: profile.photos && profile.photos[0] ? profile.photos[0].value : null,
         isEmailVerified: !!email, // Mark as verified if email provided
-        // No password for OAuth users
+        templateDesigns: [], // Explicitly set empty array
+        password: null // No password for OAuth users
     });
     
     await newUser.save();

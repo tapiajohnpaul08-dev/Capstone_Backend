@@ -2,7 +2,11 @@
 const mongoose = require('mongoose');
 
 const designTemplateSchema = new mongoose.Schema({
-  templateId: { type: String, required: true, unique: true },
+  templateId: { 
+    type: String, 
+    required: true, 
+    sparse: true // This should be at the field level, not the schema level
+  },
   name: { type: String, required: true },
   imagePath: { type: String, required: true },
   printSize: { type: String, default: '' },
@@ -55,7 +59,11 @@ const customerSchema = new mongoose.Schema({
     password: {
         type: String,
     },
-    templateDesigns: [designTemplateSchema],
+    templateDesigns: {
+        type: [designTemplateSchema],
+        default: [],
+        // Remove any index from the array itself
+    },
     orders: [
         {
             type: mongoose.Schema.Types.ObjectId,
@@ -66,6 +74,8 @@ const customerSchema = new mongoose.Schema({
     providerId: { type: String, unique: true, sparse: true },
     profileImage: { type: String, default: null },
     isEmailVerified: { type: Boolean, default: false },
+    marketingComs: { type: Boolean, default: false },
+    dataSharing: { type: Boolean, default: false },
     createdAt: {
         type: Date,
         default: Date.now,
@@ -76,6 +86,8 @@ const customerSchema = new mongoose.Schema({
         default: Date.now
     }
 });
+
+
 
 const Customer = mongoose.model('Customer', customerSchema);
 module.exports = Customer;
