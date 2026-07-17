@@ -40,6 +40,7 @@ if (payload.isProvided === true) {
     customerEmail: customerEmail,
     customerPhone: customerPhone,
     address: payload.address,
+    postalCode: payload.postalCode || "",
     items: [{
       productId: null,
       name: firstItem.name || payload.productName || "Customer Provided Items",
@@ -176,6 +177,8 @@ if (payload.isProvided === true) {
         customerEmail: customerEmail,
         customerPhone: customerPhone,
         address: payload.address,
+        postalCode: payload.postalCode || "",
+
         items: processedItems,
         quantity: processedItems.reduce((sum, i) => sum + i.quantity, 0),
         amount: totalAmount,

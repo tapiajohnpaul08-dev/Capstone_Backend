@@ -101,6 +101,7 @@ const orderSchema = new mongoose.Schema({
   customerEmail: { type: String },
   customerPhone: { type: String },
   address: { type: String },
+  postalCode: { type: String},
   customerId: { type: String, ref: "Customer" },
   productId: { type: String },
   productName: { type: String },
