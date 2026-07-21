@@ -46,10 +46,11 @@ class ChatService {
       const conversations = await Conversation.find(query)
         .sort({ lastMessageAt: -1 });
       
-      // Get last message for each conversation
       for (const conv of conversations) {
-        const lastMessage = await Message.findOne({ conversationId: conv.conversationId })
-          .sort({ createdAt: -1 });
+        const lastMessage = await Message.findOne({ 
+          conversationId: conv.conversationId,
+          isDeleted: { $ne: true } // Exclude deleted messages
+        }).sort({ createdAt: -1 });
         
         conv._doc.lastMessage = lastMessage?.content || '';
         conv._doc.lastMessageTime = lastMessage?.createdAt || conv.lastMessageAt;
@@ -73,8 +74,10 @@ class ChatService {
         .sort({ lastMessageAt: -1 });
       
       for (const conv of conversations) {
-        const lastMessage = await Message.findOne({ conversationId: conv.conversationId })
-          .sort({ createdAt: -1 });
+        const lastMessage = await Message.findOne({ 
+          conversationId: conv.conversationId,
+          isDeleted: { $ne: true } // Exclude deleted messages
+        }).sort({ createdAt: -1 });
         
         conv._doc.lastMessage = lastMessage?.content || '';
         conv._doc.lastMessageTime = lastMessage?.createdAt || conv.lastMessageAt;
@@ -109,8 +112,6 @@ class ChatService {
   
   async updateConversationStatus(conversationId, status) {
     try {
-
-      console.log('sent status:', status)
       const conversation = await Conversation.findOne({ conversationId });
       if (!conversation) {
         return { success: false, message: 'Conversation not found' };
@@ -130,50 +131,139 @@ class ChatService {
   // MESSAGES
   // ─────────────────────────────────────────
   
-  async sendMessage(conversationId, senderId, senderName, senderType, content, attachments = []) {
+async sendMessage(conversationId, senderId, senderName, senderType, content, attachments = [], replyToMessageId = null) {
+  try {
+    const conversation = await Conversation.findOne({ conversationId });
+    if (!conversation) {
+      return { success: false, message: 'Conversation not found' };
+    }
+    
+    const isCustomer = senderType === 'customer';
+    
+    console.log('📨 Service received replyToMessageId:', replyToMessageId);
+    
+    // If replying, get the original message
+    let replyTo = null;
+    if (replyToMessageId) {
+      const originalMessage = await Message.findOne({ messageId: replyToMessageId });
+      console.log('📨 Original message found:', originalMessage ? 'YES' : 'NO');
+      if (originalMessage && !originalMessage.isDeleted) {
+        replyTo = {
+          messageId: originalMessage.messageId,
+          content: originalMessage.content || '📎 Attachment',
+          sender: originalMessage.senderName || originalMessage.senderType
+        };
+        console.log('📨 ReplyTo data set:', replyTo);
+      }
+    }
+    
+    const message = new Message({
+      messageId: await generateId('MSG'),
+      conversationId,
+      senderType,
+      senderId,
+      senderName,
+      content,
+      attachments: attachments || [],
+      replyTo: replyTo,
+      replyToMessageId: replyToMessageId, // Store the ID too
+      isDeleted: false
+    });
+    
+    await message.save();
+    console.log('📨 Message saved with replyTo:', message.replyTo);
+    console.log('📨 Message saved with replyToMessageId:', message.replyToMessageId);
+    
+    // Update conversation
+    conversation.lastMessage = content;
+    conversation.lastMessageAt = new Date();
+    conversation.lastMessageBy = senderType;
+    
+    if (isCustomer) {
+      conversation.adminUnreadCount += 1;
+      conversation.customerUnreadCount = 0;
+    } else {
+      conversation.customerUnreadCount += 1;
+      conversation.adminUnreadCount = 0;
+    }
+    
+    if (isCustomer && ['resolved', 'closed'].includes(conversation.status)) {
+      conversation.status = 'open';
+    }
+    
+    await conversation.save();
+    
+    // Return the full message with replyTo data
+    const savedMessage = await Message.findOne({ messageId: message.messageId });
+    
+    return { success: true, data: savedMessage, conversation };
+  } catch (error) {
+    console.error('Error in sendMessage:', error);
+    throw error;
+  }
+}
+  // ─────────────────────────────────────────
+  // UNSEND MESSAGE
+  // ─────────────────────────────────────────
+  async unsendMessage(messageId, userId, userType) {
     try {
-      const conversation = await Conversation.findOne({ conversationId });
-      if (!conversation) {
-        return { success: false, message: 'Conversation not found' };
+      const message = await Message.findOne({ messageId });
+      if (!message) {
+        return { success: false, message: 'Message not found' };
       }
       
-      const isCustomer = senderType === 'customer';
+      // Check if user is the sender
+      if (message.senderId !== userId || message.senderType !== userType) {
+        return { success: false, message: 'You can only unsend your own messages' };
+      }
       
-      const message = new Message({
-        messageId: await generateId('MSG'),
-        conversationId,
-        senderType,
-        senderId,
-        senderName,
-        content,
-        attachments
-      });
+      // Check if message is already deleted
+      if (message.isDeleted) {
+        return { success: false, message: 'Message already unsent' };
+      }
       
+      // Check if message is too old (e.g., older than 5 minutes)
+      const messageAge = Date.now() - new Date(message.createdAt).getTime();
+      const MAX_UNSEND_TIME = 5 * 60 * 1000; // 5 minutes
+      
+      if (messageAge > MAX_UNSEND_TIME) {
+        return { success: false, message: 'Message can only be unsent within 5 minutes' };
+      }
+      
+      // Soft delete the message
+      message.isDeleted = true;
+      message.deletedAt = new Date();
+      message.content = 'This message was unsent';
       await message.save();
       
-      // Update conversation
-      conversation.lastMessage = content;
-      conversation.lastMessageAt = new Date();
-      conversation.lastMessageBy = senderType;
-      
-      if (isCustomer) {
-        conversation.adminUnreadCount += 1;
-        conversation.customerUnreadCount = 0;
-      } else {
-        conversation.customerUnreadCount += 1;
-        conversation.adminUnreadCount = 0;
+      // Update conversation last message if this was the last message
+      const conversation = await Conversation.findOne({ conversationId: message.conversationId });
+      if (conversation) {
+        // Find the most recent non-deleted message
+        const lastMessage = await Message.findOne({
+          conversationId: message.conversationId,
+          isDeleted: { $ne: true }
+        }).sort({ createdAt: -1 });
+        
+        if (lastMessage) {
+          conversation.lastMessage = lastMessage.content;
+          conversation.lastMessageAt = lastMessage.createdAt;
+          conversation.lastMessageBy = lastMessage.senderType;
+        } else {
+          conversation.lastMessage = 'No messages';
+          conversation.lastMessageAt = new Date();
+          conversation.lastMessageBy = null;
+        }
+        await conversation.save();
       }
       
-      // Reopen if customer messages on resolved/closed conversation
-      if (isCustomer && ['resolved', 'closed'].includes(conversation.status)) {
-        conversation.status = 'open';
-      }
-      
-      await conversation.save();
-      
-      return { success: true, data: message, conversation };
+      return { 
+        success: true, 
+        message: 'Message unsent successfully',
+        data: message
+      };
     } catch (error) {
-      console.error('Error in sendMessage:', error);
+      console.error('Error in unsendMessage:', error);
       throw error;
     }
   }
@@ -185,12 +275,14 @@ class ChatService {
         return { success: false, message: 'Conversation not found' };
       }
       
-      // Verify access
       if (userType === 'customer' && conversation.customerId !== userId) {
         return { success: false, message: 'Access denied' };
       }
       
-      const query = { conversationId };
+      const query = { 
+        conversationId,
+        isDeleted: { $ne: true } // Exclude deleted messages
+      };
       if (before) {
         query.createdAt = { $lt: new Date(before) };
       }
@@ -199,7 +291,6 @@ class ChatService {
         .sort({ createdAt: -1 })
         .limit(limit);
       
-      // Mark as read
       const isCustomer = userType === 'customer';
       const updateField = isCustomer ? 'customerUnreadCount' : 'adminUnreadCount';
       
@@ -223,7 +314,18 @@ class ChatService {
   async getUnreadCount(userId, userType) {
     try {
       const field = userType === 'customer' ? 'customerUnreadCount' : 'adminUnreadCount';
-      const query = userType === 'customer' ? { customerId: userId } : { adminId: userId };
+      
+      let query = {};
+      if (userType === 'customer') {
+        query = { customerId: userId };
+      } else {
+        query = { 
+          $or: [
+            { adminId: userId },
+            { adminId: null }
+          ]
+        };
+      }
       
       const conversations = await Conversation.find(query);
       const totalUnread = conversations.reduce((sum, c) => sum + (c[field] || 0), 0);
@@ -235,51 +337,48 @@ class ChatService {
     }
   }
 
-  // Get unread conversations for a user
-async getUnreadConversations(userId, userType) {
-  try {
-    const query = userType === 'customer' 
-      ? { customerId: userId, customerUnreadCount: { $gt: 0 } }
-      : { adminId: userId, adminUnreadCount: { $gt: 0 } };
-    
-    const conversations = await Conversation.find(query)
-      .select('conversationId subject lastMessage lastMessageAt customerUnreadCount adminUnreadCount');
-    
-    const totalUnread = conversations.reduce((sum, c) => {
-      return sum + (userType === 'customer' ? c.customerUnreadCount : c.adminUnreadCount);
-    }, 0);
-    
-    return { success: true, data: { conversations, totalUnread } };
-  } catch (error) {
-    console.error('Error getting unread conversations:', error);
-    throw error;
-  }
-}
-
-// Get conversation by ID with participants
-async getConversationWithParticipants(conversationId) {
-  try {
-    const conversation = await Conversation.findOne({ conversationId });
-    if (!conversation) {
-      throw new NotFoundError('Conversation not found');
+  async getUnreadConversations(userId, userType) {
+    try {
+      const query = userType === 'customer' 
+        ? { customerId: userId, customerUnreadCount: { $gt: 0 } }
+        : { adminId: userId, adminUnreadCount: { $gt: 0 } };
+      
+      const conversations = await Conversation.find(query)
+        .select('conversationId subject lastMessage lastMessageAt customerUnreadCount adminUnreadCount');
+      
+      const totalUnread = conversations.reduce((sum, c) => {
+        return sum + (userType === 'customer' ? c.customerUnreadCount : c.adminUnreadCount);
+      }, 0);
+      
+      return { success: true, data: { conversations, totalUnread } };
+    } catch (error) {
+      console.error('Error getting unread conversations:', error);
+      throw error;
     }
-    
-    // Get online status from socket service
-    const socketService = require('../server').socketService; // You'll need to export this
-    
-    return {
-      success: true,
-      data: {
-        ...conversation.toObject(),
-        customerOnline: socketService?.isUserOnline(conversation.customerId) || false,
-        adminOnline: conversation.adminId ? socketService?.isUserOnline(conversation.adminId) || false : false
-      }
-    };
-  } catch (error) {
-    console.error('Error getting conversation:', error);
-    throw error;
   }
-}
+
+  async getConversationWithParticipants(conversationId) {
+    try {
+      const conversation = await Conversation.findOne({ conversationId });
+      if (!conversation) {
+        throw new NotFoundError('Conversation not found');
+      }
+      
+      const socketService = require('../server').socketService;
+      
+      return {
+        success: true,
+        data: {
+          ...conversation.toObject(),
+          customerOnline: socketService?.isUserOnline(conversation.customerId) || false,
+          adminOnline: conversation.adminId ? socketService?.isUserOnline(conversation.adminId) || false : false
+        }
+      };
+    } catch (error) {
+      console.error('Error getting conversation:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = new ChatService();

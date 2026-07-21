@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const rateLimit = require('express-rate-limit');
-const OtpController = require('../controller/OtpContoller');
+const OtpController = require('../models/OtpContoller');
 
 // Rate limiting for OTP requests (max 3 requests per 10 minutes per IP)
 const otpLimiter = rateLimit({

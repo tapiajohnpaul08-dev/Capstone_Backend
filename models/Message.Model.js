@@ -9,6 +9,8 @@ const messageSchema = new mongoose.Schema({
   senderId: { type: String, required: true, index: true },
   senderName: { type: String, required: true },
   
+
+
   // Message content
   content: { type: String, required: true },
   contentType: { 
@@ -16,6 +18,7 @@ const messageSchema = new mongoose.Schema({
     enum: ['text', 'image', 'file', 'system'],
     default: 'text'
   },
+  
   
   // File attachments (for images, PDFs, documents)
   attachments: [{
@@ -28,7 +31,15 @@ const messageSchema = new mongoose.Schema({
   
   // Reply to another message (optional)
   replyToMessageId: { type: String, ref: 'Message', default: null },
-  
+  // In Message.Model.js - add this field
+replyTo: {
+  type: {
+    messageId: String,
+    content: String,
+    sender: String
+  },
+  default: null
+},
   // Read status
   isRead: { type: Boolean, default: false, index: true },
   readAt: { type: Date, default: null },

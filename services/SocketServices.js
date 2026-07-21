@@ -78,8 +78,13 @@ class SocketService {
     });
   }
 
-  async saveAndEmitMessage(conversationId, senderId, senderName, senderType, content, attachments, socket) {
+  // ─────────────────────────────────────────
+  // SAVE AND EMIT MESSAGE - FIXED with replyToMessageId
+  // ─────────────────────────────────────────
+  async saveAndEmitMessage(conversationId, senderId, senderName, senderType, content, attachments, replyToMessageId, socket) {
     try {
+      console.log('💬 SocketService.saveAndEmitMessage called with replyToMessageId:', replyToMessageId);
+      
       const conversation = await Conversation.findOne({ conversationId });
       if (!conversation) {
         socket.emit('error', { message: 'Conversation not found' });
@@ -88,6 +93,22 @@ class SocketService {
       
       const isCustomer = senderType === 'customer';
       
+      // ── If replying, get the original message ──
+      let replyTo = null;
+      if (replyToMessageId) {
+        const originalMessage = await Message.findOne({ messageId: replyToMessageId });
+        console.log('📨 Original message found:', originalMessage ? 'YES' : 'NO');
+        if (originalMessage && !originalMessage.isDeleted) {
+          replyTo = {
+            messageId: originalMessage.messageId,
+            content: originalMessage.content || '📎 Attachment',
+            sender: originalMessage.senderName || originalMessage.senderType
+          };
+          console.log('📨 ReplyTo data set:', replyTo);
+        }
+      }
+      
+      // ── Create message with replyTo data ──
       const message = new Message({
         messageId: await generateId('MSG'),
         conversationId,
@@ -97,11 +118,17 @@ class SocketService {
         content,
         contentType: attachments?.length > 0 ? (attachments[0].type?.startsWith('image/') ? 'image' : 'file') : 'text',
         attachments: attachments || [],
+        replyTo: replyTo,
+        replyToMessageId: replyToMessageId, // Store the ID too
+        isDeleted: false,
         createdAt: new Date()
       });
       
       await message.save();
+      console.log('📨 Message saved with replyTo:', message.replyTo);
+      console.log('📨 Message saved with replyToMessageId:', message.replyToMessageId);
       
+      // ── Update conversation ──
       conversation.lastMessage = content;
       conversation.lastMessageAt = new Date();
       conversation.lastMessageBy = senderType;
@@ -119,7 +146,13 @@ class SocketService {
       
       await conversation.save();
       
-      const messageData = message.toObject();
+      // ── Get the saved message with all fields ──
+      const savedMessage = await Message.findOne({ messageId: message.messageId });
+      const messageData = savedMessage.toObject();
+      
+      console.log('📨 Emitting message with replyTo:', messageData.replyTo);
+      
+      // ── Emit to conversation room ──
       this.io.to(`conv_${conversationId}`).emit('new-message', messageData);
       
       return messageData;

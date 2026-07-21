@@ -41,9 +41,7 @@ class ChatController {
   
   // Get single conversation
   getConversation = asyncTryCatch(async (req, res, next) => {
-    // This would need a getConversationById method
     const { conversationId } = req.params;
-    // Implementation...
     res.status(200).json({ success: true });
   });
   
@@ -66,22 +64,50 @@ class ChatController {
     res.status(200).json(response);
   });
   
-  // Send message
-  sendMessage = asyncTryCatch(async (req, res, next) => {
-    const { conversationId, content, attachments } = req.body;
+// Send message
+sendMessage = asyncTryCatch(async (req, res, next) => {
+  const { conversationId, content, attachments, replyToMessageId } = req.body;
+  const userType = req.customer ? 'customer' : 'admin';
+  const userId = req.customer?.customerId || req.admin?.adminId;
+  const userName = req.customer?.firstName 
+    ? `${req.customer.firstName} ${req.customer.lastName}`
+    : req.admin?.firstName 
+      ? `${req.admin.firstName} ${req.admin.lastName}`
+      : 'User';
+  
+  console.log('📨 Controller received:', { 
+    conversationId, 
+    userId, 
+    userType, 
+    content, 
+    replyToMessageId 
+  });
+  
+  const response = await chatService.sendMessage(
+    conversationId, userId, userName, userType, content, attachments || [], replyToMessageId
+  );
+  
+  console.log('📨 Controller response:', response.success ? 'SUCCESS' : 'FAILED');
+  console.log('📨 Controller replyTo:', response.data?.replyTo);
+  
+  // Emit socket event for real-time update
+  const io = req.app.get('io');
+  if (io && response.success) {
+    io.to(conversationId).emit('new-message', response.data);
+  }
+  
+  res.status(201).json(response);
+});
+  // ─────────────────────────────────────────
+  // UNSEND MESSAGE
+  // ─────────────────────────────────────────
+  unsendMessage = asyncTryCatch(async (req, res, next) => {
+    const { messageId } = req.params;
     const userType = req.customer ? 'customer' : 'admin';
     const userId = req.customer?.customerId || req.admin?.adminId;
-    const userName = req.customer?.firstName 
-      ? `${req.customer.firstName} ${req.customer.lastName}`
-      : req.admin?.firstName 
-        ? `${req.admin.firstName} ${req.admin.lastName}`
-        : 'User';
     
-    const response = await chatService.sendMessage(
-      conversationId, userId, userName, userType, content, attachments || []
-    );
-    
-    res.status(201).json(response);
+    const response = await chatService.unsendMessage(messageId, userId, userType);
+    res.status(200).json(response);
   });
   
   // Get messages
@@ -98,13 +124,18 @@ class ChatController {
     res.status(200).json(response);
   });
   
-  // Get unread count
   getUnreadCount = asyncTryCatch(async (req, res, next) => {
-    const userType = req.customer ? 'customer' : 'admin';
-    const userId = req.customer?.customerId || req.admin?.adminId;
+    const adminId = req.admin?._id || req.admin?.adminId || req.user?._id;
     
-    const response = await chatService.getUnreadCount(userId, userType);
-    res.status(200).json(response);
+    if (!adminId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized'
+      });
+    }
+    
+    const result = await chatService.getUnreadCount(adminId, 'admin');
+    res.status(200).json(result);
   });
 }
 

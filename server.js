@@ -217,6 +217,7 @@ io.on('connection', (socket) => {
       socket.userType,
       content,
       attachments,
+      replyToMessageId,
       socket
     );
     
