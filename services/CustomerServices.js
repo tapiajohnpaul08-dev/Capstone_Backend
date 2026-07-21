@@ -300,41 +300,42 @@ class CustomerService {
     }
   }
 
-  async requestPasswordChangeOtp(email) {
-    try {
-      const customer = await Customer.findOne({ email: email.toLowerCase() });
+async requestPasswordChangeOtp(email) {
+  try {
+    const customer = await Customer.findOne({ email: email.toLowerCase() });
 
-      if (!customer) {
-        return {
-          success: false,
-          message: "Customer not found",
-        };
-      }
-
-      // Check if customer has a password (local account)
-      const hasPassword = customer.password && customer.password.length > 0;
-
-      // Send OTP using the otpUtils
-      const { sendOtp } = require("../utils/otpUtils");
-      const result = await sendOtp(email);
-
-      if (!result.success) {
-        return result;
-      }
-
+    if (!customer) {
       return {
-        success: true,
-        message: "OTP sent to your email",
-        data: {
-          hasPassword: hasPassword,
-          provider: customer.provider || "local",
-        },
+        success: false,
+        message: "Customer not found",
       };
-    } catch (error) {
-      console.error("Error requesting password change OTP:", error);
-      throw error;
     }
+
+    // Check if customer has a password (local account)
+    const hasPassword = customer.password && customer.password.length > 0;
+
+    // Send OTP using the otpUtils
+    const { sendOtp } = require("../utils/otpUtils");
+    const result = await sendOtp(email);
+
+    if (!result.success) {
+      return result;
+    }
+
+    return {
+      success: true,
+      message: "OTP sent to your email",
+      data: {
+        hasPassword: hasPassword,
+        provider: customer.provider || "local",
+        isOAuth: customer.provider && customer.provider !== "local"
+      },
+    };
+  } catch (error) {
+    console.error("Error requesting password change OTP:", error);
+    throw error;
   }
+}
 
   // ─────────────────────────────────────────
   // UPDATE PASSWORD WITH OTP VERIFICATION

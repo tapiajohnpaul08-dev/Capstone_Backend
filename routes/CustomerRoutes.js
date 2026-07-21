@@ -23,9 +23,9 @@ router.put('/:customerId/password', verifyCustomerToken, CustomerController.chan
 // ─────────────────────────────────────────
 // PASSWORD CHANGE WITH OTP ROUTES
 // ─────────────────────────────────────────
-router.post('/request-password-otp', verifyCustomerToken, CustomerController.requestPasswordChangeOtp);
-router.post('/update-password-with-otp', verifyCustomerToken, CustomerController.updatePasswordWithOtp);
-router.put('/update-password-with-current/:customerId', verifyCustomerToken, CustomerController.updatePasswordWithCurrent);
+router.post('/request-password-otp', CustomerController.requestPasswordChangeOtp);
+router.post('/update-password-with-otp', CustomerController.updatePasswordWithOtp);
+router.put('/update-password-with-current/:customerId', CustomerController.updatePasswordWithCurrent);
 
 // ─────────────────────────────────────────
 // CUSTOMER TEMPLATE ROUTES

@@ -118,22 +118,22 @@ class CustomerController {
         res.status(status).json(response);
     });
 
-    // POST /api/v1/customer/request-password-otp
-    requestPasswordChangeOtp = asyncTryCatch(async (req, res, next) => {
-        // Get email from authenticated user or request body
-        const email = req.customer?.email || req.body.email;
-        
-        if (!email) {
-            return res.status(400).json({
-                success: false,
-                message: 'Email is required'
-            });
-        }
-        
-        const response = await customerService.requestPasswordChangeOtp(email);
-        const status = response.success ? 200 : 400;
-        res.status(status).json(response);
-    });
+   // POST /api/v1/customer/request-password-otp
+requestPasswordChangeOtp = asyncTryCatch(async (req, res, next) => {
+    // Get email from authenticated user or request body
+    const email = req.customer?.email || req.body.email;
+    
+    if (!email) {
+        return res.status(400).json({
+            success: false,
+            message: 'Email is required'
+        });
+    }
+    
+    const response = await customerService.requestPasswordChangeOtp(email);
+    const status = response.success ? 200 : 400;
+    res.status(status).json(response);
+});
 
     // POST /api/v1/customer/update-password-with-otp
     updatePasswordWithOtp = asyncTryCatch(async (req, res, next) => {
