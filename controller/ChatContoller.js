@@ -64,40 +64,40 @@ class ChatController {
     res.status(200).json(response);
   });
   
-// Send message
-sendMessage = asyncTryCatch(async (req, res, next) => {
-  const { conversationId, content, attachments, replyToMessageId } = req.body;
-  const userType = req.customer ? 'customer' : 'admin';
-  const userId = req.customer?.customerId || req.admin?.adminId;
-  const userName = req.customer?.firstName 
-    ? `${req.customer.firstName} ${req.customer.lastName}`
-    : req.admin?.firstName 
-      ? `${req.admin.firstName} ${req.admin.lastName}`
-      : 'User';
-  
-  console.log('📨 Controller received:', { 
-    conversationId, 
-    userId, 
-    userType, 
-    content, 
-    replyToMessageId 
+  // Send message
+  sendMessage = asyncTryCatch(async (req, res, next) => {
+    const { conversationId, content, attachments, replyToMessageId } = req.body;
+    const userType = req.customer ? 'customer' : 'admin';
+    const userId = req.customer?.customerId || req.admin?.adminId;
+    const userName = req.customer?.firstName 
+      ? `${req.customer.firstName} ${req.customer.lastName}`
+      : req.admin?.firstName 
+        ? `${req.admin.firstName} ${req.admin.lastName}`
+        : 'User';
+    
+    console.log('📨 Controller received:', { 
+      conversationId, 
+      userId, 
+      userType, 
+      content, 
+      replyToMessageId 
+    });
+    
+    const response = await chatService.sendMessage(
+      conversationId, userId, userName, userType, content, attachments || [], replyToMessageId
+    );
+    
+    console.log('📨 Controller response:', response.success ? 'SUCCESS' : 'FAILED');
+    console.log('📨 Controller replyTo:', response.data?.replyTo);
+    
+    const io = req.app.get('io');
+    if (io && response.success) {
+      io.to(conversationId).emit('new-message', response.data);
+    }
+    
+    res.status(201).json(response);
   });
   
-  const response = await chatService.sendMessage(
-    conversationId, userId, userName, userType, content, attachments || [], replyToMessageId
-  );
-  
-  console.log('📨 Controller response:', response.success ? 'SUCCESS' : 'FAILED');
-  console.log('📨 Controller replyTo:', response.data?.replyTo);
-  
-  // Emit socket event for real-time update
-  const io = req.app.get('io');
-  if (io && response.success) {
-    io.to(conversationId).emit('new-message', response.data);
-  }
-  
-  res.status(201).json(response);
-});
   // ─────────────────────────────────────────
   // UNSEND MESSAGE
   // ─────────────────────────────────────────
@@ -124,7 +124,27 @@ sendMessage = asyncTryCatch(async (req, res, next) => {
     res.status(200).json(response);
   });
   
-  getUnreadCount = asyncTryCatch(async (req, res, next) => {
+  // ─────────────────────────────────────────
+  // GET UNREAD COUNT - CUSTOMER
+  // ─────────────────────────────────────────
+  getCustomerUnreadCount = asyncTryCatch(async (req, res, next) => {
+    const { customerId } = req.customer;
+    
+    if (!customerId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized'
+      });
+    }
+    
+    const result = await chatService.getUnreadCount(customerId, 'customer');
+    res.status(200).json(result);
+  });
+  
+  // ─────────────────────────────────────────
+  // GET UNREAD COUNT - ADMIN
+  // ─────────────────────────────────────────
+  getAdminUnreadCount = asyncTryCatch(async (req, res, next) => {
     const adminId = req.admin?._id || req.admin?.adminId || req.user?._id;
     
     if (!adminId) {

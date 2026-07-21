@@ -11,9 +11,9 @@ router.post('/customer/conversations', verifyCustomerToken, ChatController.getOr
 router.get('/customer/conversations', verifyCustomerToken, ChatController.getMyConversations);
 router.get('/customer/conversations/:conversationId/messages', verifyCustomerToken, ChatController.getMessages);
 router.post('/customer/messages', verifyCustomerToken, ChatController.sendMessage);
-router.get('/customer/unread-count', verifyCustomerToken, ChatController.getUnreadCount);
+// ✅ Customer unread count - uses customer token
+router.get('/customer/unread-count', verifyCustomerToken, ChatController.getCustomerUnreadCount);
 router.patch('/customer/conversations/:conversationId/status', verifyCustomerToken, ChatController.updateStatus);
-// Unsend message for customer
 router.delete('/customer/messages/:messageId', verifyCustomerToken, ChatController.unsendMessage);
 
 // ─────────────────────────────────────────
@@ -22,10 +22,10 @@ router.delete('/customer/messages/:messageId', verifyCustomerToken, ChatControll
 router.get('/admin/conversations', verifyAdminToken, ChatController.getAdminConversations);
 router.get('/admin/conversations/:conversationId/messages', verifyAdminToken, ChatController.getMessages);
 router.post('/admin/messages', verifyAdminToken, ChatController.sendMessage);
-router.get('/admin/unread-count', verifyAdminToken, ChatController.getUnreadCount);
+// ✅ Admin unread count - uses admin token
+router.get('/admin/unread-count', verifyAdminToken, ChatController.getAdminUnreadCount);
 router.patch('/admin/conversations/:conversationId/assign', verifyAdminToken, ChatController.assignConversation);
 router.patch('/admin/conversations/:conversationId/status', verifyAdminToken, ChatController.updateStatus);
-// Unsend message for admin
 router.delete('/admin/messages/:messageId', verifyAdminToken, ChatController.unsendMessage);
 
 // File upload endpoint for chat
