@@ -12,7 +12,7 @@ const fileMetaSchema = new mongoose.Schema(
 );
 
 const designDetailsSchema = new mongoose.Schema({
-  designSource: { type: String, enum: ["upload", "saved"] },
+  designSource: { type: String, enum: ["upload", "saved", "no-design"] },
   printSize: { type: String },
   printPlacement: { type: String },
   designNotes: { type: String },
@@ -42,7 +42,7 @@ const orderItemSchema = new mongoose.Schema({
   category: { type: String },
   size: { type: String },
   quantity: { type: Number, required: true },
-  designSource: { type: String, enum: ["upload", "saved"] },
+  designSource: { type: String, enum: ["upload", "saved", "no-design"] },
   designImage: { type: String, default: "" }, // Add this if not exists
 
   printSize: { type: String },
@@ -101,7 +101,7 @@ const orderSchema = new mongoose.Schema({
   customerEmail: { type: String },
   customerPhone: { type: String },
   address: { type: String },
-  postalCode: { type: String},
+  postalCode: { type: String },
   customerId: { type: String, ref: "Customer" },
   productId: { type: String },
   productName: { type: String },
@@ -142,8 +142,8 @@ const orderSchema = new mongoose.Schema({
   },
   receivingMode: { type: String, enum: ["Pick-up", "Delivery"] },
   deliveryMethod: { type: String, enum: ["Delivery", "Pick-up"] },
-  supplyType: { type: String, enum: ["Own Cups", "Company Cups"] },
-  type: { type: String, enum: ["own-cups", "company-product"] },
+  supplyType: { type: String, enum: ["Own Items", "Company Cups"] },
+  type: { type: String, enum: ["own-items", "company-product"] },
   productionSchedule: { type: Date, default: null },
   driverDetails: driverDetailsSchema,
   isProvided: { type: Boolean, default: false },
@@ -152,6 +152,27 @@ const orderSchema = new mongoose.Schema({
   orderedBy: { type: String },
   orderedById: { type: String },
   expectedDelivery: { type: Date },
+  expectedDelivery: {
+    type: Date,
+    required: true,
+  },
+
+  preferredDate: {
+    type: Date,
+    required: false,
+  },
+
+  preferredTime: {
+    type: String,
+    enum: [
+      "Morning (8AM - 12PM)",
+      "Afternoon (1PM - 5PM)",
+      "Evening (5PM - 8PM)",
+      "Anytime",
+      "",
+    ],
+    default: "",
+  },
   orderedAt: { type: Date, default: Date.now },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },

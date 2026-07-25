@@ -28,14 +28,35 @@ class OrderService {
         return { success: false, message: "Customer email is required" };
       }
 
+
+       // Calculate expected delivery - use preferred date if provided
+    let expectedDelivery;
+    if (payload.preferredDate) {
+      expectedDelivery = new Date(payload.preferredDate);
+      // Ensure it's at least 5 business days from now
+      const minDate = this.getBusinessDaysFromToday(5);
+      if (expectedDelivery < minDate) {
+        expectedDelivery = minDate;
+      }
+      // Ensure it's not more than 7 business days
+      const maxDate = this.getBusinessDaysFromToday(7);
+      if (expectedDelivery > maxDate) {
+        expectedDelivery = maxDate;
+      }
+    } else {
+      expectedDelivery = this.calculateExpectedDelivery(payload.receivingMode);
+    }
+
       // Handle Own Cups orders
 // Handle Own Cups orders
 if (payload.isProvided === true) {
   // Get the first item from the items array
   const firstItem = payload.items && payload.items.length > 0 ? payload.items[0] : {}
+
+  const providedId = await generateId('ORD');
   
   const newOrder = new Order({
-    orderId: await generateId('ORD'),
+    orderId: `${providedId}-PROV`,
     customerName: customerName,
     customerEmail: customerEmail,
     customerPhone: customerPhone,
@@ -62,8 +83,10 @@ if (payload.isProvided === true) {
     status: "Pending",
     paymentStatus: "Unpaid",
     receivingMode: payload.receivingMode,
-    expectedDelivery: this.calculateExpectedDelivery(payload.receivingMode),
-    isProvided: true,
+      expectedDelivery: expectedDelivery,
+      preferredDate: payload.preferredDate || null,
+      preferredTime: payload.preferredTime || null,    
+      isProvided: true,
     orderedBy: orderedById,
     notes: payload.notes || "Customer provided items for printing",
     statusHistory: [{
@@ -171,8 +194,10 @@ if (payload.isProvided === true) {
         await product.save();
       }
 
+      const OrderId = await generateId('ORD');
+
       const newOrder = new Order({
-        orderId: await generateId(),
+        orderId: `${OrderId}-COMP`,
         customerName: customerName,
         customerEmail: customerEmail,
         customerPhone: customerPhone,
@@ -185,8 +210,9 @@ if (payload.isProvided === true) {
         status: "Pending",
         paymentStatus: "Unpaid",
         receivingMode: payload.receivingMode,
-        expectedDelivery: this.calculateExpectedDelivery(payload.receivingMode),
-        isProvided: false,
+        expectedDelivery: expectedDelivery,
+        preferredDate: payload.preferredDate || null,
+        preferredTime: payload.preferredTime || null,        isProvided: false,
         orderedBy: orderedById,
         notes: payload.notes || `Order with ${processedItems.length} item(s)`,
         statusHistory: [
@@ -246,6 +272,22 @@ if (payload.isProvided === true) {
 
     return result;
   }
+
+  // Add this helper method
+getBusinessDaysFromToday(days) {
+  const date = new Date();
+  let businessDaysAdded = 0;
+  
+  while (businessDaysAdded < days) {
+    date.setDate(date.getDate() + 1);
+    const dayOfWeek = date.getDay();
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+      businessDaysAdded++;
+    }
+  }
+  
+  return date;
+}
 
   // ─────────────────────────────────────────
   // UPDATE ORDER STATUS (with inventory restoration on cancel)
