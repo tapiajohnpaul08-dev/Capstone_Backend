@@ -263,14 +263,11 @@ class AdminService {
           message: "Admins cannot delete their own account",
         };
       }
-
-      if (!currentAdmin) {
-        const admin = await Admin.findOneAndDelete({ adminId });
-      }
+            
+      const admin = await Admin.findOneAndDelete({ adminId });
       if (!admin) {
         return { success: false, message: "Admin not found" };
       }
-
       return { success: true, message: "Admin deleted successfully" };
     } catch (error) {
       console.error("Error deleting admin:", error);
