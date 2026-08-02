@@ -5,6 +5,7 @@ const morgan = require('morgan');
 const session = require('express-session');
 const passport = require('./config/passport');
 const path = require('path');
+const fs = require('fs'); // Add this
 const jwt = require('jsonwebtoken');
 const http = require('http');
 const socketIO = require('socket.io');
@@ -20,7 +21,6 @@ const server = http.createServer(app);
 // ─────────────────────────────────────────
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) {
       return callback(null, true);
     }
@@ -31,10 +31,10 @@ const corsOptions = {
       'http://localhost:5174',
       'http://127.0.0.1:5173',
       'https://acaps-inventory-system.vercel.app',
-      'https://capstone-backend-nr2u.onrender.com'
+      'https://capstone-backend-nr2u.onrender.com',
+      'https://capstone-acapsshop.vercel.app' // Add your shop domain
     ];
     
-    // Log for debugging
     console.log('CORS Request from origin:', origin);
     
     if (allowedOrigins.indexOf(origin) !== -1) {
@@ -48,10 +48,9 @@ const corsOptions = {
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'X-HTTP-Method-Override'],
   exposedHeaders: ['Content-Length', 'X-Requested-With'],
-  maxAge: 86400 // 24 hours
+  maxAge: 86400
 };
 
-// Apply CORS middleware
 app.use(cors(corsOptions));
 
 // ─────────────────────────────────────────
@@ -81,13 +80,10 @@ app.use(session({
   cookie: {
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+    maxAge: 24 * 60 * 60 * 1000
   }
 }));
 
-// ─────────────────────────────────────────
-// PASSPORT MIDDLEWARE
-// ─────────────────────────────────────────
 app.use(passport.initialize());
 app.use(passport.session());
 
@@ -107,9 +103,25 @@ app.use(helmet({
 }));
 
 app.use(morgan('dev'));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// ─────────────────────────────────────────
+// STATIC FILE SERVING - FIXED
+// ─────────────────────────────────────────
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Helper endpoint to check if image exists
+app.get('/api/v1/images/:folder/:filename', (req, res) => {
+  const { folder, filename } = req.params;
+  const filePath = path.join(__dirname, 'uploads', folder, filename);
+  
+  if (fs.existsSync(filePath)) {
+    res.sendFile(filePath);
+  } else {
+    res.status(404).json({ error: 'Image not found' });
+  }
+});
 
 // ─────────────────────────────────────────
 // ROUTES
@@ -139,26 +151,18 @@ app.use((req, res) => {
   });
 });
 
-// ─────────────────────────────────────────
-// SOCKET SERVICE
-// ─────────────────────────────────────────
+// Socket Service and handlers (keep your existing socket code)
 const SocketService = require('./services/SocketServices');
 const socketService = new SocketService(io);
 app.set('socketService', socketService);
 
-// ─────────────────────────────────────────
-// SOCKET AUTHENTICATION MIDDLEWARE
-// ─────────────────────────────────────────
 io.use(async (socket, next) => {
   try {
     const token = socket.handshake.auth.token;
-    
     if (!token) {
       return next(new Error('Authentication required'));
     }
-    
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-jwt-secret-change-in-production');
-    
     socket.userId = decoded.customerId || decoded.adminId || decoded.id;
     socket.userType = decoded.customerId ? 'customer' : 'admin';
     socket.userInfo = {
@@ -166,7 +170,6 @@ io.use(async (socket, next) => {
       email: decoded.email,
       ...decoded
     };
-    
     next();
   } catch (err) {
     console.error('Socket auth error:', err.message);
@@ -174,39 +177,20 @@ io.use(async (socket, next) => {
   }
 });
 
-// ─────────────────────────────────────────
-// SOCKET CONNECTION HANDLER
-// ─────────────────────────────────────────
 io.on('connection', (socket) => {
   console.log(`🔌 User connected: ${socket.userId} (${socket.userType})`);
-  
-  // Store online user
   socketService.addOnlineUser(socket.userId, socket.id, socket.userType, socket.userInfo);
-  
-  // Broadcast online status to all
   io.emit('users-online', socketService.getOnlineUsers());
-  
-  // Join user to their personal room for direct messages
   socket.join(`user_${socket.userId}`);
   
-  // ─────────────────────────────────────────
-  // EVENT HANDLERS
-  // ─────────────────────────────────────────
-  
-  // Join conversation room
   socket.on('join-conversation', async (data) => {
     const { conversationId } = data;
     if (!conversationId) {
       socket.emit('error', { message: 'Conversation ID required' });
       return;
     }
-    
     socketService.joinConversation(socket, conversationId, socket.userId, socket.userType);
-    
-    // Mark messages as read when joining
     await socketService.markAsRead(conversationId, socket.userId, socket.userType, socket);
-    
-    // Send unread count
     const Conversation = require('./models/Conversation.Model');
     const conversation = await Conversation.findOne({ conversationId });
     if (conversation) {
@@ -217,22 +201,17 @@ io.on('connection', (socket) => {
     }
   });
   
-  // Leave conversation room
   socket.on('leave-conversation', ({ conversationId }) => {
     socketService.leaveConversation(socket, conversationId);
   });
   
-  // Send message
   socket.on('send-message', async (data) => {
     const { conversationId, content, attachments, replyToMessageId } = data;
-    
     if (!conversationId || (!content && (!attachments || attachments.length === 0))) {
       socket.emit('error', { message: 'Message content required' });
       return;
     }
-    
     const senderName = socket.userInfo?.name || (socket.userType === 'customer' ? 'Customer' : 'Support Team');
-    
     const message = await socketService.saveAndEmitMessage(
       conversationId,
       socket.userId,
@@ -243,17 +222,13 @@ io.on('connection', (socket) => {
       replyToMessageId,
       socket
     );
-    
     if (message) {
-      // Send confirmation back to sender
       socket.emit('message-sent', message);
     }
   });
   
-  // Typing indicator
   socket.on('typing', ({ conversationId, isTyping }) => {
     if (!conversationId) return;
-    
     socketService.handleTyping(
       conversationId,
       socket.userId,
@@ -263,14 +238,11 @@ io.on('connection', (socket) => {
     );
   });
   
-  // Mark conversation as read
   socket.on('mark-read', async ({ conversationId }) => {
     if (!conversationId) return;
-    
     await socketService.markAsRead(conversationId, socket.userId, socket.userType, socket);
   });
   
-  // Get online status of users
   socket.on('get-online-status', ({ userIds }) => {
     const statuses = {};
     for (const userId of userIds) {
@@ -279,7 +251,6 @@ io.on('connection', (socket) => {
     socket.emit('online-statuses', statuses);
   });
   
-  // Disconnect
   socket.on('disconnect', () => {
     console.log(`🔌 User disconnected: ${socket.userId}`);
     socketService.removeOnlineUser(socket.userId);
@@ -287,7 +258,6 @@ io.on('connection', (socket) => {
   });
 });
 
-// Make io accessible in routes
 app.set('io', io);
 
 // ─────────────────────────────────────────
