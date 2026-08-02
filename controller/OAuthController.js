@@ -1,61 +1,68 @@
 // controller/OAuthController.js
 const passport = require('../config/passport');
 
+const FRONTEND_URL = process.env.NODE_ENV === 'production'
+    ? 'https://capstone-acapsshop.vercel.app'  // ← Correct frontend URL
+    : 'http://localhost:5173';
+
 class OAuthController {
     
-    /**
-     * Initiate Google OAuth for Customer
-     * GET /api/v1/auth/google
-     */
     googleAuth(req, res, next) {
         passport.authenticate('google', { scope: ['profile', 'email'] })(req, res, next);
     };
     
-    /**
-     * Google OAuth Callback - Redirects to Customer Frontend
-     * GET /api/v1/auth/google/callback
-     */
     googleCallback(req, res, next) {
         passport.authenticate('google', { session: false }, (err, profile) => {
             if (err || !profile) {
                 console.error('Google auth error:', err);
-                return res.redirect('https://capstone-acapsshop.vercel.app/customer/login?error=auth_failed');
+                return res.redirect(`${FRONTEND_URL}/customer/login?error=auth_failed`);
             }
             
             const token = profile.authToken;
+            const userData = profile.userData;
             
-            // Redirect to customer dashboard with token
-            return res.redirect(`https://capstone-acapsshop.vercel.app/customer/dashboard?token=${token}`);
+            const encodedUserData = encodeURIComponent(JSON.stringify({
+                _id: userData._id,
+                customerId: userData.customerId,
+                firstName: userData.firstName,
+                lastName: userData.lastName,
+                email: userData.email,
+                profileImage: userData.profileImage,
+                username: userData.username
+            }));
+            
+            return res.redirect(`${FRONTEND_URL}/customer/login?token=${token}&user=${encodedUserData}`);
         })(req, res, next);
     };
     
-    /**
-     * Initiate Facebook OAuth for Customer
-     * GET /api/v1/auth/facebook
-     */
     facebookAuth(req, res, next) {
         passport.authenticate('facebook', { scope: ['email', 'public_profile'] })(req, res, next);
     };
     
-    /**
-     * Facebook OAuth Callback - Redirects to Customer Frontend
-     * GET /api/v1/auth/facebook/callback
-     */
     facebookCallback(req, res, next) {
         passport.authenticate('facebook', { session: false }, (err, profile) => {
             if (err || !profile) {
                 console.error('Facebook auth error:', err);
-                return res.redirect('https://capstone-acapsshop.vercel.app/customer/login?error=auth_failed');
+                return res.redirect(`${FRONTEND_URL}/customer/login?error=auth_failed`);
             }
             
             const token = profile.authToken;
-            return res.redirect(`https://capstone-acapsshop.vercel.app/customer/dashboard?token=${token}`);
+            const userData = profile.userData;
+            
+            const encodedUserData = encodeURIComponent(JSON.stringify({
+                _id: userData._id,
+                customerId: userData.customerId,
+                firstName: userData.firstName,
+                lastName: userData.lastName,
+                email: userData.email,
+                profileImage: userData.profileImage,
+                username: userData.username
+            }));
+            
+            return res.redirect(`${FRONTEND_URL}/customer/login?token=${token}&user=${encodedUserData}`);
         })(req, res, next);
     };
     
-    /**
-     * Google OAuth Callback with JSON response (for mobile apps)
-     */
     googleCallbackJson(req, res, next) {
         passport.authenticate('google', { session: false }, (err, profile) => {
             if (err || !profile) {

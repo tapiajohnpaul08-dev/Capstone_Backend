@@ -11,7 +11,7 @@ const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = '24h';
 
 const BACKEND_URL = process.env.NODE_ENV === 'production' 
-    ? 'https://capstone-backend-nr2u.onrender.com' 
+    ? 'https://capstone-backend-bp5a.onrender.com' 
     : 'http://localhost:3001';
 
 /**

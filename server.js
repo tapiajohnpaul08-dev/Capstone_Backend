@@ -31,8 +31,8 @@ const corsOptions = {
       'http://localhost:5174',
       'http://127.0.0.1:5173',
       'https://acaps-inventory-system.vercel.app',
-      'https://capstone-backend-nr2u.onrender.com',
-      'https://capstone-acapsshop.vercel.app' // Add your shop domain
+      'https://capstone-backend-bp5a.onrender.com',  // ← Updated URL
+      'https://capstone-acapsshop.vercel.app'   // Add your shop domain
     ];
     
     console.log('CORS Request from origin:', origin);
@@ -62,7 +62,9 @@ const io = socketIO(server, {
       'http://localhost:5173', 
       'http://localhost:5174', 
       'http://127.0.0.1:5173', 
-      'https://acaps-inventory-system.vercel.app'
+      'https://acaps-inventory-system.vercel.app',
+  'https://capstone-backend-bp5a.onrender.com',  // ← Updated URL
+  'https://capstone-acapsshop.vercel.app'  
     ],
     credentials: true,
     methods: ['GET', 'POST']
