@@ -42,7 +42,7 @@ const adminSchema = new mongoose.Schema({
     role: {
         type: String,
         required: true,
-        enum: ['Sales', 'Production']
+        enum: ['Sales', 'Production', 'Super Admin'], // Define roles as needed
     },
     lastLogin: {
         type: Date,

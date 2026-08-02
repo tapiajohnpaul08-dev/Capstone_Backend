@@ -104,6 +104,7 @@ app.use('/api/v1/alerts', require('./routes/AlertRoutes'));
 app.use('/api/v1/auth', require('./routes/OAuthRoutes'));
 app.use('/api/v1/designs', require('./routes/DesignRoutes')); // Added design routes
 app.use('/api/v1/chat', require('./routes/ChatRoutes')); // Added chat routes
+app.use('/api/v1/drivers', require('./routes/DriverRoutes'));
 
 // ─────────────────────────────────────────
 // 404 HANDLER

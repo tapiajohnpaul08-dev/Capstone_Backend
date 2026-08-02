@@ -2,6 +2,8 @@
 const Order = require("../models/Order.Model");
 const InventoryItem = require("../models/InventoryItem.Model");
 const Product = require("../models/Product.Model");
+const Driver = require("../models/Driver.Model");
+const DriverService = require("./DriverServices"); // Import DriverService
 const generateId = require('../utils/generateItemId');
 
 class OrderService {
@@ -28,96 +30,90 @@ class OrderService {
         return { success: false, message: "Customer email is required" };
       }
 
-
-       // Calculate expected delivery - use preferred date if provided
-    let expectedDelivery;
-    if (payload.preferredDate) {
-      expectedDelivery = new Date(payload.preferredDate);
-      // Ensure it's at least 5 business days from now
-      const minDate = this.getBusinessDaysFromToday(5);
-      if (expectedDelivery < minDate) {
-        expectedDelivery = minDate;
+      // Calculate expected delivery - use preferred date if provided
+      let expectedDelivery;
+      if (payload.preferredDate) {
+        expectedDelivery = new Date(payload.preferredDate);
+        const minDate = this.getBusinessDaysFromToday(5);
+        if (expectedDelivery < minDate) {
+          expectedDelivery = minDate;
+        }
+        const maxDate = this.getBusinessDaysFromToday(7);
+        if (expectedDelivery > maxDate) {
+          expectedDelivery = maxDate;
+        }
+      } else {
+        expectedDelivery = this.calculateExpectedDelivery(payload.receivingMode);
       }
-      // Ensure it's not more than 7 business days
-      const maxDate = this.getBusinessDaysFromToday(7);
-      if (expectedDelivery > maxDate) {
-        expectedDelivery = maxDate;
-      }
-    } else {
-      expectedDelivery = this.calculateExpectedDelivery(payload.receivingMode);
-    }
 
       // Handle Own Cups orders
-// Handle Own Cups orders
-if (payload.isProvided === true) {
-  // Get the first item from the items array
-  const firstItem = payload.items && payload.items.length > 0 ? payload.items[0] : {}
+      if (payload.isProvided === true) {
+        const firstItem = payload.items && payload.items.length > 0 ? payload.items[0] : {}
 
-  const providedId = await generateId('ORD');
-  
-  const newOrder = new Order({
-    orderId: `${providedId}-PROV`,
-    customerName: customerName,
-    customerEmail: customerEmail,
-    customerPhone: customerPhone,
-    address: payload.address,
-    postalCode: payload.postalCode || "",
-    items: [{
-      productId: null,
-      name: firstItem.name || payload.productName || "Customer Provided Items",
-      category: "Customer Provided",
-      size: firstItem.size || payload.size || "Custom",
-      quantity: firstItem.quantity || payload.quantity,
-      designSource: firstItem.designSource || payload.designSource || "upload",
-      designImage: firstItem.designImage || payload.designImage || "",
-      printSize: firstItem.printSize || payload.printSize || "",
-      printPlacement: firstItem.printPlacement || payload.printPlacement || "",
-      designNotes: firstItem.designNotes || payload.designNotes || "",
-      files: firstItem.files || payload.files || [],
-      selectedTemplateId: firstItem.selectedTemplateId || null,
-      selectedTemplate: firstItem.selectedTemplate || null,
-      estimatedTotal: 0,
-    }],
-    quantity: firstItem.quantity || payload.quantity,
-    amount: payload.amount,
-    status: "Pending",
-    paymentStatus: "Unpaid",
-    receivingMode: payload.receivingMode,
-      expectedDelivery: expectedDelivery,
-      preferredDate: payload.preferredDate || null,
-      preferredTime: payload.preferredTime || null,    
-      isProvided: true,
-    orderedBy: orderedById,
-    notes: payload.notes || "Customer provided items for printing",
-    statusHistory: [{
-      status: "Pending",
-      timestamp: new Date(),
-      notes: "Order created (customer provided items)",
-      updatedBy: orderedById,
-    }],
-    customer: {
-      name: customerName,
-      email: customerEmail,
-      phone: customerPhone,
-      company: payload.customer?.company || '',
-    },
-    paymentMethod: payload.paymentMethod || 'cod',
-    paymentDetails: payload.paymentDetails || null,
-  });
-  
-  await newOrder.save();
-  return {
-    success: true,
-    message: "Order created successfully",
-    data: newOrder,
-  };
-}
+        const providedId = await generateId('ORD');
+        
+        const newOrder = new Order({
+          orderId: `${providedId}-PROV`,
+          customerName: customerName,
+          customerEmail: customerEmail,
+          customerPhone: customerPhone,
+          address: payload.address,
+          postalCode: payload.postalCode || "",
+          items: [{
+            productId: null,
+            name: firstItem.name || payload.productName || "Customer Provided Items",
+            category: "Customer Provided",
+            size: firstItem.size || payload.size || "Custom",
+            quantity: firstItem.quantity || payload.quantity,
+            designSource: firstItem.designSource || payload.designSource || "upload",
+            designImage: firstItem.designImage || payload.designImage || "",
+            printSize: firstItem.printSize || payload.printSize || "",
+            printPlacement: firstItem.printPlacement || payload.printPlacement || "",
+            designNotes: firstItem.designNotes || payload.designNotes || "",
+            files: firstItem.files || payload.files || [],
+            selectedTemplateId: firstItem.selectedTemplateId || null,
+            selectedTemplate: firstItem.selectedTemplate || null,
+            estimatedTotal: 0,
+          }],
+          quantity: firstItem.quantity || payload.quantity,
+          amount: payload.amount,
+          status: "Pending",
+          paymentStatus: "Unpaid",
+          receivingMode: payload.receivingMode,
+          expectedDelivery: expectedDelivery,
+          preferredDate: payload.preferredDate || null,
+          preferredTime: payload.preferredTime || null,    
+          isProvided: true,
+          orderedBy: orderedById,
+          notes: payload.notes || "Customer provided items for printing",
+          statusHistory: [{
+            status: "Pending",
+            timestamp: new Date(),
+            notes: "Order created (customer provided items)",
+            updatedBy: orderedById,
+          }],
+          customer: {
+            name: customerName,
+            email: customerEmail,
+            phone: customerPhone,
+            company: payload.customer?.company || '',
+          },
+          paymentMethod: payload.paymentMethod || 'cod',
+          paymentDetails: payload.paymentDetails || null,
+        });
+        
+        await newOrder.save();
+        return {
+          success: true,
+          message: "Order created successfully",
+          data: newOrder,
+        };
+      }
 
-      // Handle company products - always use items array
+      // Handle company products
       const processedItems = [];
       let totalAmount = 0;
 
-      // Get items from payload (supports both single and multiple)
       const itemsToProcess = payload.items || [
         {
           productId: payload.productId,
@@ -130,8 +126,8 @@ if (payload.isProvided === true) {
           printPlacement: payload.printPlacement || "",
           designNotes: payload.designNotes || "",
           files: payload.files || [],
-          selectedTemplate: payload.selectedTemplate || null, // ← ADD THIS
-          selectedTemplateId: payload.selectedTemplateId || null, // ← ADD THIS
+          selectedTemplate: payload.selectedTemplate || null,
+          selectedTemplateId: payload.selectedTemplateId || null,
         },
       ];
 
@@ -156,7 +152,6 @@ if (payload.isProvided === true) {
           };
         }
 
-        // Calculate price
         let unitPrice = sizeObj.price;
         const qty = item.quantity;
         if (qty >= 5000 && sizeObj.bulkPrices?.[5000])
@@ -178,18 +173,17 @@ if (payload.isProvided === true) {
           size: item.size,
           quantity: item.quantity,
           designSource: item.designSource || "upload",
-          designImage: item.designImage || "", // ← ADD THIS - Critical!
+          designImage: item.designImage || "",
           printSize: item.printSize || "",
           printPlacement: item.printPlacement || "",
           designNotes: item.designNotes || "",
           files: item.files || [],
-          selectedTemplate: item.selectedTemplate || null, // ← ADD THIS
-          selectedTemplateId: item.selectedTemplateId || null, // ← ADD THIS
+          selectedTemplate: item.selectedTemplate || null,
+          selectedTemplateId: item.selectedTemplateId || null,
           estimatedTotal: itemTotal,
           image: product.image,
         });
 
-        // Deduct stock
         sizeObj.stock -= item.quantity;
         await product.save();
       }
@@ -212,7 +206,8 @@ if (payload.isProvided === true) {
         receivingMode: payload.receivingMode,
         expectedDelivery: expectedDelivery,
         preferredDate: payload.preferredDate || null,
-        preferredTime: payload.preferredTime || null,        isProvided: false,
+        preferredTime: payload.preferredTime || null,
+        isProvided: false,
         orderedBy: orderedById,
         notes: payload.notes || `Order with ${processedItems.length} item(s)`,
         statusHistory: [
@@ -229,6 +224,8 @@ if (payload.isProvided === true) {
           phone: customerPhone,
           company: payload.customer?.company,
         },
+        paymentMethod: payload.paymentMethod || 'cod',
+        paymentDetails: payload.paymentDetails || null,
       });
 
       await newOrder.save();
@@ -244,27 +241,26 @@ if (payload.isProvided === true) {
       throw error;
     }
   }
+
   // ─────────────────────────────────────────
   // CALCULATE EXPECTED DELIVERY DATE
   // ─────────────────────────────────────────
   calculateExpectedDelivery(receivingMode) {
     const now = new Date();
-    let daysToAdd = 7; // Default 7 business days
+    let daysToAdd = 7;
 
     if (receivingMode === "Pick-up") {
-      daysToAdd = 5; // Pick-up usually faster
+      daysToAdd = 5;
     } else if (receivingMode === "Delivery") {
-      daysToAdd = 6; // Delivery takes longer
+      daysToAdd = 6;
     }
 
-    // Add business days (skip weekends)
     let result = new Date(now);
     let daysAdded = 0;
 
     while (daysAdded < daysToAdd) {
       result.setDate(result.getDate() + 1);
       const dayOfWeek = result.getDay();
-      // Skip Saturday (6) and Sunday (0)
       if (dayOfWeek !== 0 && dayOfWeek !== 6) {
         daysAdded++;
       }
@@ -273,31 +269,30 @@ if (payload.isProvided === true) {
     return result;
   }
 
-  // Add this helper method
-getBusinessDaysFromToday(days) {
-  const date = new Date();
-  let businessDaysAdded = 0;
-  
-  while (businessDaysAdded < days) {
-    date.setDate(date.getDate() + 1);
-    const dayOfWeek = date.getDay();
-    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-      businessDaysAdded++;
+  getBusinessDaysFromToday(days) {
+    const date = new Date();
+    let businessDaysAdded = 0;
+    
+    while (businessDaysAdded < days) {
+      date.setDate(date.getDate() + 1);
+      const dayOfWeek = date.getDay();
+      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+        businessDaysAdded++;
+      }
     }
+    
+    return date;
   }
-  
-  return date;
-}
 
   // ─────────────────────────────────────────
-  // UPDATE ORDER STATUS (with inventory restoration on cancel)
+  // UPDATE ORDER STATUS (with driver assignment tracking)
   // ─────────────────────────────────────────
   async updateOrderStatus(
     orderId,
     newStatus,
     notes,
     productionSchedule = null,
-    driverDetails = null,
+    driverId = null,
     user = null,
   ) {
     try {
@@ -328,33 +323,60 @@ getBusinessDaysFromToday(days) {
         };
       }
 
-      // If status is changing to "Scheduled", save production schedule
+      const oldStatus = order.status;
+
+      // ─── SCHEDULED: Save production schedule ──────────────────────────────
       if (newStatus === "Scheduled" && productionSchedule) {
         order.productionSchedule = new Date(productionSchedule);
       }
 
-      // If status is changing to "Out for Delivery" and has driver details
-      if (
-        newStatus === "Out for Delivery" &&
-        driverDetails &&
-        order.receivingMode === "Delivery"
-      ) {
+      // ─── OUT FOR DELIVERY: Assign driver ─────────────────────────────────
+      if (newStatus === "Out for Delivery" && driverId && order.receivingMode === "Delivery") {
+        const driver = await Driver.findOne({ driverId });
+        
+        if (!driver) {
+          return { success: false, message: "Driver not found" };
+        }
+
+        // Check if driver is available
+        if (!driver.available) {
+          return { success: false, message: "Driver is not available" };
+        }
+
+        // Store driver details in order
         order.driverDetails = {
-          driverName: driverDetails.driverName,
-          driverPhone: driverDetails.driverPhone,
-          plateNumber: driverDetails.plateNumber,
-          truckDescription: driverDetails.truckDescription,
-          assignedAt: new Date(),
+          driverId: driver.driverId,
+          driverName: driver.fullName || `${driver.firstName} ${driver.lastName}`,
+          driverPhone: driver.phoneNumber,
+          plateNumber: driver.plateNumber,
+          truckDescription: driver.vehicleDescription || '',
+          assignedAt: new Date()
         };
+
+        // ✅ INCREMENT assigned orders count for the driver
+        const incrementResult = await DriverService.incrementAssignedOrders(driverId);
+        
+        if (!incrementResult.success) {
+          return { success: false, message: incrementResult.message };
+        }
+        console.log(`✅ Driver ${driverId} assigned orders count incremented to ${incrementResult.data.assignedOrdersCount}`);
       }
 
-      // If cancelling order, restore inventory (only for company products)
+      // ─── COMPLETED OR CANCELLED: Release driver ───────────────────────────
+      if ((newStatus === "Completed" || newStatus === "Cancelled") && order.driverDetails?.driverId) {
+        // ✅ DECREMENT assigned orders count for the driver
+        const decrementResult = await DriverService.decrementAssignedOrders(order.driverDetails.driverId);
+        if (decrementResult.success) {
+          console.log(`✅ Driver ${order.driverDetails.driverId} assigned orders count decremented to ${decrementResult.data.assignedOrdersCount}`);
+        }
+      }
+
+      // ─── CANCELLED: Restore inventory ─────────────────────────────────────
       if (
         newStatus === "Cancelled" &&
         order.status !== "Cancelled" &&
         !order.isProvided
       ) {
-        // Handle inventory restoration for multiple items
         for (const item of order.items) {
           if (item.productId) {
             const product = await Product.findOne({ id: item.productId });
@@ -372,25 +394,28 @@ getBusinessDaysFromToday(days) {
         }
       }
 
-      const oldStatus = order.status;
+      // ─── UPDATE ORDER ─────────────────────────────────────────────────────
       order.status = newStatus;
 
       // Build status history entry
       const historyEntry = {
         status: newStatus,
         timestamp: new Date(),
-        notes: notes,
+        notes: notes || '',
         updatedBy: user ? user._id.toString() : null,
       };
 
-      // Add production schedule to history if provided
       if (productionSchedule) {
         historyEntry.productionSchedule = productionSchedule;
       }
 
-      // Add driver details to history if provided
-      if (driverDetails && order.receivingMode === "Delivery") {
-        historyEntry.driverDetails = driverDetails;
+      if (order.driverDetails && order.receivingMode === "Delivery") {
+        historyEntry.driverDetails = {
+          driverName: order.driverDetails.driverName,
+          driverPhone: order.driverDetails.driverPhone,
+          plateNumber: order.driverDetails.plateNumber,
+          truckDescription: order.driverDetails.truckDescription,
+        };
       }
 
       order.statusHistory.push(historyEntry);
@@ -414,7 +439,7 @@ getBusinessDaysFromToday(days) {
   }
 
   // ─────────────────────────────────────────
-  // UPDATE ORDER (with quantity adjustment)
+  // UPDATE ORDER
   // ─────────────────────────────────────────
   async updateOrder(orderId, payload, user = null) {
     try {
@@ -428,7 +453,6 @@ getBusinessDaysFromToday(days) {
         return { success: false, message: "Order not found" };
       }
 
-      // If updating quantity and it's a company product, adjust inventory
       if (updateData.quantity && !order.isProvided) {
         const quantityDiff = updateData.quantity - order.quantity;
         const product = await Product.findOne({ id: order.productId });
@@ -482,7 +506,7 @@ getBusinessDaysFromToday(days) {
   }
 
   // ─────────────────────────────────────────
-  // DELETE ORDER (with inventory restoration)
+  // DELETE ORDER
   // ─────────────────────────────────────────
   async deleteOrder(orderId) {
     try {
@@ -492,7 +516,7 @@ getBusinessDaysFromToday(days) {
         return { success: false, message: "Order not found" };
       }
 
-      // Restore inventory for company products if order is not completed or cancelled
+      // Restore inventory
       if (
         !order.isProvided &&
         order.status !== "Completed" &&
@@ -513,6 +537,12 @@ getBusinessDaysFromToday(days) {
         }
       }
 
+      // Release driver if assigned
+      if (order.driverDetails?.driverId) {
+        await DriverService.decrementAssignedOrders(order.driverDetails.driverId);
+        console.log(`✅ Driver ${order.driverDetails.driverId} released on order deletion`);
+      }
+
       await Order.findOneAndDelete({ orderId });
 
       return {
@@ -527,7 +557,7 @@ getBusinessDaysFromToday(days) {
   }
 
   // ─────────────────────────────────────────
-  // GET ALL ORDERS (with filters)
+  // GET ALL ORDERS
   // ─────────────────────────────────────────
   async getAllOrders(filters = {}) {
     try {
@@ -590,7 +620,7 @@ getBusinessDaysFromToday(days) {
   }
 
   // ─────────────────────────────────────────
-  // GET ORDERS BY ORDERED BY (User who placed order)
+  // GET ORDERS BY ORDERED BY
   // ─────────────────────────────────────────
   async getOrdersByOrderedBy(orderedById) {
     try {
@@ -771,7 +801,7 @@ getBusinessDaysFromToday(days) {
   }
 
   // ─────────────────────────────────────────
-  // GET RECENT ORDERS (for dashboard)
+  // GET RECENT ORDERS
   // ─────────────────────────────────────────
   async getRecentOrders(limit = 10) {
     try {
