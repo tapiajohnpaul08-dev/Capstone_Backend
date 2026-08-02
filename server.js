@@ -2,125 +2,153 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
-// const cookieParser = require('cookie-parser');
-const session = require('express-session'); // Add this
-const passport = require('./config/passport'); // Add this
+const session = require('express-session');
+const passport = require('./config/passport');
 const path = require('path');
-const jwt = require('jsonwebtoken');  // ← Add this line
+const jwt = require('jsonwebtoken');
 const http = require('http');
 const socketIO = require('socket.io');
 
 require('dotenv').config();
-
 require('./config/db_config');
 
 const app = express();
-
-const server = http.createServer(app);  // ← CREATE SERVER HERE
-
+const server = http.createServer(app);
 
 // ─────────────────────────────────────────
-// MIDDLEWARE
+// CORS CONFIGURATION - PRODUCTION READY
 // ─────────────────────────────────────────
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) {
+      return callback(null, true);
+    }
+    
+    const allowedOrigins = [
+      'http://localhost:5173',
+      'http://localhost:3000',
+      'http://localhost:5174',
+      'http://127.0.0.1:5173',
+      'https://acaps-inventory-system.vercel.app',
+      'https://capstone-backend-nr2u.onrender.com'
+    ];
+    
+    // Log for debugging
+    console.log('CORS Request from origin:', origin);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('CORS blocked origin:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'X-HTTP-Method-Override'],
+  exposedHeaders: ['Content-Length', 'X-Requested-With'],
+  maxAge: 86400 // 24 hours
+};
 
-// Socket.io setup
+// Apply CORS middleware
+app.use(cors(corsOptions));
+
+// ─────────────────────────────────────────
+// SOCKET.IO SETUP
+// ─────────────────────────────────────────
 const io = socketIO(server, {
   cors: {
-    origin: ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173', 'https://capstone-backend-nr2u.onrender.com','https://acaps-inventory-system.vercel.app' ],
+    origin: [
+      'http://localhost:5173', 
+      'http://localhost:5174', 
+      'http://127.0.0.1:5173', 
+      'https://acaps-inventory-system.vercel.app'
+    ],
     credentials: true,
     methods: ['GET', 'POST']
   },
   transports: ['websocket', 'polling']
 });
 
-
-// Session middleware (required for Passport)
+// ─────────────────────────────────────────
+// SESSION MIDDLEWARE
+// ─────────────────────────────────────────
 app.use(session({
-    secret: process.env.SESSION_SECRET,
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-        secure: process.env.NODE_ENV === 'production',
-        httpOnly: true,
-        maxAge: 24 * 60 * 60 * 1000 // 24 hours
-    }
+  secret: process.env.SESSION_SECRET || 'your-secret-key-change-in-production',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
 }));
 
-// Passport middleware
+// ─────────────────────────────────────────
+// PASSPORT MIDDLEWARE
+// ─────────────────────────────────────────
 app.use(passport.initialize());
 app.use(passport.session());
 
-app.use((req, res, next) => {
-  // Allow all origins in development
-  const allowedOrigins = ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:5174', 'http://127.0.0.1:5173'];
-  const origin = req.headers.origin;
-  
-  if (allowedOrigins.includes(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
-  }
-  
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-HTTP-Method-Override');
-  res.header('Access-Control-Expose-Headers', 'Content-Length, X-Requested-With');
-  
-  // Handle preflight requests
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
-  next();
-});
-// app.use(cookieParser());
+// ─────────────────────────────────────────
+// OTHER MIDDLEWARE
+// ─────────────────────────────────────────
 app.use(helmet({
-    crossOriginResourcePolicy: { policy: "cross-origin" },
-    contentSecurityPolicy: {
-        directives: {
-            defaultSrc: ["'self'"],
-            imgSrc: ["'self'", "data:", "https:", "http:", "blob:"],
-            styleSrc: ["'self'", "'unsafe-inline'"],
-            scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-        },
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:", "http:", "blob:"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
     },
+  },
 }));
+
 app.use(morgan('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-
 // ─────────────────────────────────────────
 // ROUTES
 // ─────────────────────────────────────────
-app.use('/api/v1/admin',     require('./routes/AdminRoutes'));
-app.use('/api/v1/customer',  require('./routes/CustomerRoutes'));
-app.use('/api/v1/product',   require('./routes/ProductRoutes'));
-app.use('/api/v1/supplies',    require('./routes/SupplyRoutes')); 
+app.use('/api/v1/admin', require('./routes/AdminRoutes'));
+app.use('/api/v1/customer', require('./routes/CustomerRoutes'));
+app.use('/api/v1/product', require('./routes/ProductRoutes'));
+app.use('/api/v1/supplies', require('./routes/SupplyRoutes'));
 app.use('/api/v1/inventory', require('./routes/InventoryItemRoutes'));
-app.use('/api/v1/order',     require('./routes/OrderRoutes')); // Added order routes
-app.use('/api/v1/admin', require('./routes/DashboardRoutes')); // Added dashboard routes
-app.use('/api/v1/analytics', require('./routes/AnalyticsRoutes')); // Added analytics routes
+app.use('/api/v1/order', require('./routes/OrderRoutes'));
+app.use('/api/v1/admin', require('./routes/DashboardRoutes'));
+app.use('/api/v1/analytics', require('./routes/AnalyticsRoutes'));
 app.use('/api/v1/otp', require('./routes/OtpRoutes'));
 app.use('/api/v1/alerts', require('./routes/AlertRoutes'));
 app.use('/api/v1/auth', require('./routes/OAuthRoutes'));
-app.use('/api/v1/designs', require('./routes/DesignRoutes')); // Added design routes
-app.use('/api/v1/chat', require('./routes/ChatRoutes')); // Added chat routes
+app.use('/api/v1/designs', require('./routes/DesignRoutes'));
+app.use('/api/v1/chat', require('./routes/ChatRoutes'));
 app.use('/api/v1/drivers', require('./routes/DriverRoutes'));
 
 // ─────────────────────────────────────────
 // 404 HANDLER
 // ─────────────────────────────────────────
 app.use((req, res) => {
-    res.status(404).json({ success: false, message: `Route ${req.originalUrl} not found` });
-}); 
+  res.status(404).json({ 
+    success: false, 
+    message: `Route ${req.originalUrl} not found` 
+  });
+});
 
-// Socket Service
+// ─────────────────────────────────────────
+// SOCKET SERVICE
+// ─────────────────────────────────────────
 const SocketService = require('./services/SocketServices');
 const socketService = new SocketService(io);
-
-// Make socket service available to routes
 app.set('socketService', socketService);
 
-// Authentication middleware for socket
+// ─────────────────────────────────────────
+// SOCKET AUTHENTICATION MIDDLEWARE
+// ─────────────────────────────────────────
 io.use(async (socket, next) => {
   try {
     const token = socket.handshake.auth.token;
@@ -129,12 +157,7 @@ io.use(async (socket, next) => {
       return next(new Error('Authentication required'));
     }
     
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    // Check if token is blacklisted (optional)
-    // const BlacklistToken = require('./models/BlacklistToken');
-    // const isBlacklisted = await BlacklistToken.findOne({ token });
-    // if (isBlacklisted) return next(new Error('Token invalidated'));
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-jwt-secret-change-in-production');
     
     socket.userId = decoded.customerId || decoded.adminId || decoded.id;
     socket.userType = decoded.customerId ? 'customer' : 'admin';
@@ -151,10 +174,9 @@ io.use(async (socket, next) => {
   }
 });
 
-
-
-
-// Socket connection handler
+// ─────────────────────────────────────────
+// SOCKET CONNECTION HANDLER
+// ─────────────────────────────────────────
 io.on('connection', (socket) => {
   console.log(`🔌 User connected: ${socket.userId} (${socket.userType})`);
   
@@ -168,7 +190,7 @@ io.on('connection', (socket) => {
   socket.join(`user_${socket.userId}`);
   
   // ─────────────────────────────────────────
-  // Event Handlers
+  // EVENT HANDLERS
   // ─────────────────────────────────────────
   
   // Join conversation room
@@ -272,15 +294,19 @@ app.set('io', io);
 // GLOBAL ERROR HANDLER
 // ─────────────────────────────────────────
 app.use((err, req, res, next) => {
-    console.error('Unhandled error:', err);
-    res.status(500).json({ success: false, message: 'Internal server error' });
+  console.error('Unhandled error:', err);
+  res.status(500).json({ 
+    success: false, 
+    message: 'Internal server error' 
+  });
 });
 
 // ─────────────────────────────────────────
-// START SERVER - USE server.listen NOT app.listen
+// START SERVER
 // ─────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`🔌 Socket.io ready for connections`);
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🔌 Socket.io ready for connections`);
+  console.log(`✅ CORS enabled for: localhost, Vercel, and Render`);
 });
