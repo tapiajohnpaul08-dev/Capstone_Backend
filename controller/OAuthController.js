@@ -2,7 +2,7 @@
 const passport = require('../config/passport');
 
 const FRONTEND_URL = process.env.NODE_ENV === 'production'
-    ? 'https://capstone-acapsshop.vercel.app'  // ← Correct frontend URL
+    ? 'https://capstone-acapsshop.vercel.app'
     : 'http://localhost:5173';
 
 class OAuthController {
@@ -31,7 +31,8 @@ class OAuthController {
                 username: userData.username
             }));
             
-            return res.redirect(`${FRONTEND_URL}/customer/login?token=${token}&user=${encodedUserData}`);
+            // ✅ Redirect to OAuth callback page
+            return res.redirect(`${FRONTEND_URL}/oauth/callback?token=${token}&user=${encodedUserData}`);
         })(req, res, next);
     };
     
@@ -59,7 +60,8 @@ class OAuthController {
                 username: userData.username
             }));
             
-            return res.redirect(`${FRONTEND_URL}/customer/login?token=${token}&user=${encodedUserData}`);
+            // ✅ Redirect to OAuth callback page
+            return res.redirect(`${FRONTEND_URL}/oauth/callback?token=${token}&user=${encodedUserData}`);
         })(req, res, next);
     };
     
