@@ -26,7 +26,7 @@ const server = http.createServer(app);  // ← CREATE SERVER HERE
 // Socket.io setup
 const io = socketIO(server, {
   cors: {
-    origin: ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173', 'https://capstone-backend-nr2u.onrender.com'],
+    origin: ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173', 'https://capstone-backend-nr2u.onrender.com','https://acaps-inventory-system.vercel.app' ],
     credentials: true,
     methods: ['GET', 'POST']
   },
