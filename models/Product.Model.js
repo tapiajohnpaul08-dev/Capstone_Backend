@@ -20,6 +20,8 @@ const productSchema = new mongoose.Schema({
     subcategory: { type: String, default: '' },
     description: { type: String, default: '' },
     image: { type: String, required: true }, // Stores relative path like '/uploads/products/product-xxx.jpg'    
+    imagePublicId: { type: String, default: null }, // Cloudinary public ID
+
     sizes: [sizeSchema],
     minOrder: { type: Number, required: true, default: 500 },
     

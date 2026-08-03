@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const ChatController = require('../controller/ChatContoller');
 const { verifyCustomerToken, verifyAdminToken } = require('../middleware/authMiddleware');
-const { chatUpload } = require('../middleware/upload');
+const { chatUpload } = require('../config/multer'); // Updated import
 
 // ─────────────────────────────────────────
 // CUSTOMER ROUTES
@@ -17,7 +17,7 @@ router.patch('/customer/conversations/:conversationId/status', verifyCustomerTok
 router.delete('/customer/messages/:messageId', verifyCustomerToken, ChatController.unsendMessage);
 
 // ─────────────────────────────────────────
-// ADMIN ROUTES
+// ADMIN ROUTES 
 // ─────────────────────────────────────────
 router.get('/admin/conversations', verifyAdminToken, ChatController.getAdminConversations);
 router.get('/admin/conversations/:conversationId/messages', verifyAdminToken, ChatController.getMessages);

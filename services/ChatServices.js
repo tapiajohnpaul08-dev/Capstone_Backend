@@ -157,19 +157,29 @@ async sendMessage(conversationId, senderId, senderName, senderType, content, att
       }
     }
     
-    const message = new Message({
-      messageId: await generateId('MSG'),
-      conversationId,
-      senderType,
-      senderId,
-      senderName,
-      content,
-      attachments: attachments || [],
-      replyTo: replyTo,
-      replyToMessageId: replyToMessageId, // Store the ID too
-      isDeleted: false
-    });
-    
+    // In sendMessage method, when creating the message object:
+const message = new Message({
+  messageId: await generateId('MSG'),
+  conversationId,
+  senderType,
+  senderId,
+  senderName,
+  content,
+  attachments: attachments.map(att => {
+    // If attachment has a Cloudinary path, use it
+    if (att.path && att.path.includes('cloudinary.com')) {
+      return {
+        ...att,
+        url: att.path,
+        publicId: att.public_id || getPublicId(att.path)
+      };
+    }
+    return att;
+  }),
+  replyTo: replyTo,
+  replyToMessageId: replyToMessageId,
+  isDeleted: false
+});
     await message.save();
     console.log('📨 Message saved with replyTo:', message.replyTo);
     console.log('📨 Message saved with replyToMessageId:', message.replyToMessageId);

@@ -813,6 +813,57 @@ class OrderService {
       throw error;
     }
   }
+
+// services/OrderServices.js
+async toggleReceivedStatus(orderId, isReceived, user = null) {
+    try {
+        const order = await Order.findOne({ orderId });
+        if (!order) {
+            return { success: false, message: "Order not found" };
+        }
+        
+        // Only allow if status is 'Out for Delivery'
+        if (order.status !== 'Out for Delivery') {
+            return { 
+                success: false, 
+                message: `Cannot mark as received. Current status: ${order.status}` 
+            };
+        }
+        
+        order.isReceived = isReceived;
+        order.updatedAt = new Date();
+        
+        // If marked as received, update status to Completed
+        if (isReceived) {
+            order.status = 'Completed';
+
+            const historyEntry = {
+            status: "Completed",
+        timestamp: new Date(),
+        notes: notes || 'Order marked as received by customer',
+        updatedBy: user ? user._id.toString() || user.email : null,
+      };
+
+            order.statusHistory.push(historyEntry);
+        }
+        
+        if (user) {
+            order.updatedBy = user._id?.toString() || user.email;
+        }
+        
+        await order.save();
+        
+        return { 
+            success: true, 
+            data: order,
+            message: 'Order marked as received successfully'
+        };
+    } catch (error) {
+        console.error("Error toggling received status:", error);
+        throw error;
+    }
+}
+
 }
 
 module.exports = new OrderService();

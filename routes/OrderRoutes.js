@@ -18,7 +18,7 @@ router.get('/customer/my-orders', orderController.getMyOrders);
 router.get('/customer/orders/:orderId', orderController.getMyOrderById);
 router.put('/customer/orders/:orderId', orderController.updateMyOrder);
 router.patch('/customer/orders/:orderId/cancel', orderController.cancelMyOrder);
-
+router.patch('/customer/orders/:orderId/mark-received', orderController.toggleReceivedStatus);
 // ─────────────────────────────────────────
 // ADMIN ROUTES (require admin authentication)
 // ─────────────────────────────────────────

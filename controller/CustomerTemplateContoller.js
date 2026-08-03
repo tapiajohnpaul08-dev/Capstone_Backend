@@ -1,7 +1,7 @@
 // controller/CustomerTemplateController.js
 const customerTemplateService = require('../services/CustomerTemplateService');
 const asyncTryCatch = require('../utils/tryAndCatch');
-const { templateUpload } = require('../middleware/upload');
+const { templateUpload } = require('../config/multer');
 
 class CustomerTemplateController {
   

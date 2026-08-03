@@ -62,7 +62,9 @@ class CustomerTemplateService {
     }
   }
   
-  // Create a new template with image upload
+// ─────────────────────────────────────────
+  // CREATE TEMPLATE
+  // ─────────────────────────────────────────
   async createTemplate(customerId, templateData, imageFile = null) {
     try {
       const customer = await Customer.findOne({ customerId });
@@ -72,38 +74,37 @@ class CustomerTemplateService {
       }
       
       let imagePath = '';
+      let imagePublicId = null;
       
-      // Ensure uploads/templates directory exists
+      // Ensure uploads/templates directory exists (for local fallback)
       const templatesDir = path.join(__dirname, '../uploads/templates');
       if (!fs.existsSync(templatesDir)) {
         fs.mkdirSync(templatesDir, { recursive: true });
       }
       
       if (imageFile) {
-        // Direct upload (new file)
-        imagePath = `/uploads/templates/${imageFile.filename}`;
+        // Cloudinary or local upload
+        if (imageFile.path) {
+          imagePath = imageFile.path;
+          imagePublicId = imageFile.public_id || getPublicId(imageFile.path);
+        } else if (imageFile.filename) {
+          imagePath = `/uploads/templates/${imageFile.filename}`;
+        }
       } else if (templateData.existingImagePath) {
-        // Copy from existing design file
+        // Copy from existing design file (local only)
         const sourcePath = path.join(__dirname, '..', templateData.existingImagePath);
         const ext = path.extname(sourcePath);
         const filename = 'template-' + Date.now() + '-' + Math.round(Math.random() * 1E9) + ext;
         const destPath = path.join(__dirname, '../uploads/templates', filename);
         
-        console.log('Source path:', sourcePath);
-        console.log('Destination path:', destPath);
-        
-        // Check if source file exists
         if (fs.existsSync(sourcePath)) {
-          // Ensure destination directory exists
           const destDir = path.dirname(destPath);
           if (!fs.existsSync(destDir)) {
             fs.mkdirSync(destDir, { recursive: true });
           }
           fs.copyFileSync(sourcePath, destPath);
           imagePath = `/uploads/templates/${filename}`;
-          console.log('Template image copied successfully to:', imagePath);
         } else {
-          console.error('Source file not found:', sourcePath);
           imagePath = '/uploads/templates/default-template.jpg';
         }
       } else {
@@ -114,19 +115,13 @@ class CustomerTemplateService {
         templateId: await generateId('TPL'),
         name: templateData.name || 'Untitled Template',
         imagePath: imagePath,
+        imagePublicId: imagePublicId,
         printSize: templateData.printSize || '',
         placement: templateData.placement || '',
         notes: templateData.notes || '',
         createdAt: new Date(),
         updatedAt: new Date()
       };
-      
-      console.log('Creating template with:', {
-        name: newTemplate.name,
-        imagePath: newTemplate.imagePath,
-        printSize: newTemplate.printSize,
-        placement: newTemplate.placement
-      });
       
       customer.templateDesigns.push(newTemplate);
       await customer.save();
@@ -192,7 +187,9 @@ class CustomerTemplateService {
     }
   }
   
-  // Delete a template (and its image)
+ // ─────────────────────────────────────────
+  // DELETE TEMPLATE
+  // ─────────────────────────────────────────
   async deleteTemplate(customerId, templateId) {
     try {
       const customer = await Customer.findOne({ customerId });
@@ -207,8 +204,10 @@ class CustomerTemplateService {
         return { success: false, message: 'Template not found' };
       }
       
-      // Delete associated image if exists and not default
-      if (template.imagePath && template.imagePath !== '/uploads/templates/default-template.jpg') {
+      // Delete associated image
+      if (template.imagePublicId) {
+        await deleteImage(template.imagePublicId);
+      } else if (template.imagePath && template.imagePath !== '/uploads/templates/default-template.jpg') {
         const imagePath = path.join(__dirname, '..', template.imagePath);
         if (fs.existsSync(imagePath)) {
           fs.unlinkSync(imagePath);
@@ -226,6 +225,14 @@ class CustomerTemplateService {
       console.error('Error deleting template:', error);
       throw error;
     }
+  }
+
+  // ─────────────────────────────────────────
+  // GET OPTIMIZED TEMPLATE IMAGE URL
+  // ─────────────────────────────────────────
+  getOptimizedTemplateImage(template, options = {}) {
+    if (!template || !template.imagePath) return null;
+    return getOptimizedUrl(template.imagePath, options);
   }
   
   // Save design from order as template

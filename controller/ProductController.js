@@ -1,7 +1,7 @@
 // controller/ProductController.js
 const productService = require('../services/ProductServices');
 const asyncTryCatch = require('../utils/tryAndCatch');
-const { productUpload } = require('../middleware/upload');
+const { productUpload } = require('../config/multer');
 
 class ProductController {
 

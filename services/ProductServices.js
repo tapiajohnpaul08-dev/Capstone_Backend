@@ -2,92 +2,102 @@ const Product = require('../models/Product.Model');
 const generateId = require('../utils/generateItemId');
 
 const InventoryItemService = require('./InventoryItemServices');
+const { getPublicId, deleteImage, getOptimizedUrl } = require('../config/multer'); // ✅ Add this import
 
 const fs = require('fs');
 const path = require('path');
 
 class ProductService {
 
-    // ─────────────────────────────────────────
-    // CREATE PRODUCT
-    // ─────────────────────────────────────────
+  // ─────────────────────────────────────────
+  // CREATE PRODUCT
+  // ─────────────────────────────────────────
   async createProduct(payload, imageFile = null) {
-        try {
-            const existingProduct = await Product.findOne({ 
-                $or: [
-                    { id: payload.id },
-                    { name: payload.name }
-                ]
-            });
+    try {
+      const existingProduct = await Product.findOne({ 
+        $or: [
+          { id: payload.id },
+          { name: payload.name }
+        ]
+      });
 
-            if (existingProduct) {
-                return {
-                    success: false,
-                    message: 'A product with this ID or name already exists'
-                };
-            }
+      if (existingProduct) {
+        return {
+          success: false,
+          message: 'A product with this ID or name already exists'
+        };
+      }
 
-            const productId = await generateId('PRD', 3);
-            
-            // Handle image URL or uploaded file
-            let imagePath = '';
-            if (imageFile) {
-                // Save image path relative to public directory
-                imagePath = `/uploads/products/${imageFile.filename}`;
-            } else if (payload.image) {
-                imagePath = payload.image;
-            } else {
-                imagePath = '/uploads/products/default-product.jpg';
-            }
-            
-            // Parse sizes if coming as JSON string
-            let sizes = payload.sizes;
-            if (typeof sizes === 'string') {
-                sizes = JSON.parse(sizes);
-            }
-            
-            const processedSizes = (sizes || []).map(size => ({
-                name: size.name,
-                price: size.price,
-                stock: size.stock || 0,
-                bulkPrices: size.bulkPrices || {}
-            }));
-            
-            const newProduct = new Product({
-                id: productId,
-                name: payload.name,
-                category: payload.category,
-                subcategory: payload.subcategory,
-                image: imagePath,
-                sizes: processedSizes,
-                minOrder: payload.minOrder || 500,
-                featured: payload.featured === 'true' || payload.featured === true,
-                popular: payload.popular === 'true' || payload.popular === true,
-                description: payload.description || ''
-            });
-
-            await newProduct.save();
-
-           // ✅ Auto-add to inventory
-await InventoryItemService.addProductToInventory(productId, {
-    stock: 0,
-    unit: 'piece',
-    threshold: 100,
-    unitCost: processedSizes[0]?.price || 0,
-    location: 'Warehouse A'
-});
-
-return {
-    success: true,
-    message: 'Product created successfully',
-    data: newProduct
-};
-
-        } catch (error) {
-            console.error('Error creating product:', error);
-            throw error;
+      const productId = await generateId('PRD', 3);
+      
+      // Handle image URL or uploaded file
+      let imagePath = '';
+      let imagePublicId = null;
+      
+      if (imageFile) {
+        // If using Cloudinary, imageFile.path contains the URL
+        if (imageFile.path) {
+          imagePath = imageFile.path;
+          imagePublicId = imageFile.public_id || getPublicId(imageFile.path);
+        } else if (imageFile.filename) {
+          // Local storage fallback
+          imagePath = `/uploads/products/${imageFile.filename}`;
         }
+      } else if (payload.image) {
+        imagePath = payload.image;
+      } else {
+        imagePath = '/uploads/products/default-product.jpg';
+      }
+      
+      // Parse sizes if coming as JSON string
+      let sizes = payload.sizes;
+      if (typeof sizes === 'string') {
+        sizes = JSON.parse(sizes);
+      }
+      
+      const processedSizes = (sizes || []).map(size => ({
+        name: size.name,
+        price: size.price,
+        stock: size.stock || 0,
+        bulkPrices: size.bulkPrices || {}
+      }));
+      
+      const newProduct = new Product({
+        id: productId,
+        name: payload.name,
+        category: payload.category,
+        subcategory: payload.subcategory,
+        image: imagePath,
+        imagePublicId: imagePublicId, // Store for deletion
+        sizes: processedSizes,
+        minOrder: payload.minOrder || 500,
+        featured: payload.featured === 'true' || payload.featured === true,
+        popular: payload.popular === 'true' || payload.popular === true,
+        description: payload.description || ''
+      });
+
+      await newProduct.save();
+
+      await InventoryItemService.addProductToInventory(productId, {
+        stock: 0,
+        unit: 'piece',
+        threshold: 100,
+        unitCost: processedSizes[0]?.price || 0,
+        location: 'Warehouse A'
+      });
+
+      return {
+        success: true,
+        message: 'Product created successfully',
+        data: newProduct
+      };
+
+    } catch (error) {
+      console.error('Error creating product:', error);
+      throw error;
     }
+  }
+
 
 
     // ─────────────────────────────────────────
@@ -122,90 +132,113 @@ return {
         }
     }
 
-    // ─────────────────────────────────────────
-    // UPDATE PRODUCT (Basic Info)
-    // ─────────────────────────────────────────
-async updateProduct(id, payload, imageFile = null) {
-        try {
-            const { id: _id, sizes, ...updateData } = payload;
-            updateData.updatedAt = new Date();
+   // ─────────────────────────────────────────
+  // UPDATE PRODUCT
+  // ─────────────────────────────────────────
+  async updateProduct(id, payload, imageFile = null) {
+    try {
+      const { id: _id, sizes, ...updateData } = payload;
+      updateData.updatedAt = new Date();
 
-            // Handle image update
-            if (imageFile) {
-                // Delete old image if exists
-                const oldProduct = await Product.findOne({ id });
-                if (oldProduct && oldProduct.image && oldProduct.image !== '/uploads/products/default-product.jpg') {
-                    const oldImagePath = path.join(__dirname, '..', oldProduct.image);
-                    if (fs.existsSync(oldImagePath)) {
-                        fs.unlinkSync(oldImagePath);
-                    }
-                }
-                updateData.image = `/uploads/products/${imageFile.filename}`;
-            }
-
-            if (sizes) {
-                let parsedSizes = sizes;
-                if (typeof sizes === 'string') {
-                    parsedSizes = JSON.parse(sizes);
-                }
-                const processedSizes = parsedSizes.map(size => ({
-                    name: size.name,
-                    price: size.price,
-                    stock: size.stock || 0,
-                    bulkPrices: size.bulkPrices || {}
-                }));
-                updateData.sizes = processedSizes;
-            }
-
-            const product = await Product.findOneAndUpdate(
-                { id },
-                updateData,
-                { new: true, runValidators: true }
-            );
-
-            if (!product) {
-                return { success: false, message: 'Product not found' };
-            }
-
-            return {
-                success: true,
-                message: 'Product updated successfully',
-                data: product
-            };
-
-        } catch (error) {
-            console.error('Error updating product:', error);
-            throw error;
+      // Handle image update
+      if (imageFile) {
+        const oldProduct = await Product.findOne({ id });
+        
+        // Delete old image from Cloudinary or local
+        if (oldProduct && oldProduct.imagePublicId) {
+          await deleteImage(oldProduct.imagePublicId);
+        } else if (oldProduct && oldProduct.image && oldProduct.image !== '/uploads/products/default-product.jpg') {
+          // Local file deletion
+          const oldImagePath = path.join(__dirname, '..', oldProduct.image);
+          if (fs.existsSync(oldImagePath)) {
+            fs.unlinkSync(oldImagePath);
+          }
         }
-    }
-
-    // ─────────────────────────────────────────
-    // DELETE PRODUCT
-    // ─────────────────────────────────────────
-    async deleteProduct(id) {
-        try {
-            const product = await Product.findOne({ id });
-            
-            if (!product) {
-                return { success: false, message: 'Product not found' };
-            }
-            
-            // Delete associated image
-            if (product.image && product.image !== '/uploads/products/default-product.jpg') {
-                const imagePath = path.join(__dirname, '..', product.image);
-                if (fs.existsSync(imagePath)) {
-                    fs.unlinkSync(imagePath);
-                }
-            }
-            
-            await Product.findOneAndDelete({ id });
-            
-            return { success: true, message: 'Product deleted successfully' };
-        } catch (error) {
-            console.error('Error deleting product:', error);
-            throw error;
+        
+        // Set new image
+        if (imageFile.path) {
+          updateData.image = imageFile.path;
+          updateData.imagePublicId = imageFile.public_id || getPublicId(imageFile.path);
+        } else if (imageFile.filename) {
+          updateData.image = `/uploads/products/${imageFile.filename}`;
+          updateData.imagePublicId = null;
         }
+      }
+
+      if (sizes) {
+        let parsedSizes = sizes;
+        if (typeof sizes === 'string') {
+          parsedSizes = JSON.parse(sizes);
+        }
+        const processedSizes = parsedSizes.map(size => ({
+          name: size.name,
+          price: size.price,
+          stock: size.stock || 0,
+          bulkPrices: size.bulkPrices || {}
+        }));
+        updateData.sizes = processedSizes;
+      }
+
+      const product = await Product.findOneAndUpdate(
+        { id },
+        updateData,
+        { new: true, runValidators: true }
+      );
+
+      if (!product) {
+        return { success: false, message: 'Product not found' };
+      }
+
+      return {
+        success: true,
+        message: 'Product updated successfully',
+        data: product
+      };
+
+    } catch (error) {
+      console.error('Error updating product:', error);
+      throw error;
     }
+  }
+
+
+     // ─────────────────────────────────────────
+  // DELETE PRODUCT
+  // ─────────────────────────────────────────
+  async deleteProduct(id) {
+    try {
+      const product = await Product.findOne({ id });
+      
+      if (!product) {
+        return { success: false, message: 'Product not found' };
+      }
+      
+      // Delete associated image from Cloudinary or local
+      if (product.imagePublicId) {
+        await deleteImage(product.imagePublicId);
+      } else if (product.image && product.image !== '/uploads/products/default-product.jpg') {
+        const imagePath = path.join(__dirname, '..', product.image);
+        if (fs.existsSync(imagePath)) {
+          fs.unlinkSync(imagePath);
+        }
+      }
+      
+      await Product.findOneAndDelete({ id });
+      
+      return { success: true, message: 'Product deleted successfully' };
+    } catch (error) {
+      console.error('Error deleting product:', error);
+      throw error;
+    }
+  }
+
+  // ─────────────────────────────────────────
+  // GET OPTIMIZED PRODUCT IMAGE URL
+  // ─────────────────────────────────────────
+  getOptimizedImage(product, options = {}) {
+    if (!product || !product.image) return null;
+    return getOptimizedUrl(product.image, options);
+  }
 
     // ─────────────────────────────────────────
     // VALIDATE SIZE DATA (Helper)

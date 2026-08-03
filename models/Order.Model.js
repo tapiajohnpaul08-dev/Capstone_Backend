@@ -140,6 +140,7 @@ const orderSchema = new mongoose.Schema({
     paidAt: { type: Date, default: null },
     proofOfPayment: { type: String, default: "" },
   },
+  isReceived: { type: Boolean, default: false },
   receivingMode: { type: String, enum: ["Pick-up", "Delivery"] },
   deliveryMethod: { type: String, enum: ["Delivery", "Pick-up"] },
   supplyType: { type: String, enum: ["Own Items", "Company Cups"] },

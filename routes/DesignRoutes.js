@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { designUpload } = require('../middleware/upload');
+const { designUpload } = require('../config/multer');
 const { verifyCustomerToken } = require('../middleware/authMiddleware');
 
 // Upload design files for order

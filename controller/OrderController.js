@@ -268,6 +268,17 @@ class OrderController {
         const status = response.success ? 200 : 404;
         res.status(status).json(response);
     });
+
+    toggleReceivedStatus = asyncTryCatch(async (req, res, next) => {
+        console.log('🔵 toggleReceivedStatus called');
+        const { orderId } = req.params;
+        const { isReceived } = req.body;
+        const user = req.customer; // ← Use customer, not admin
+
+        const response = await orderService.toggleReceivedStatus(orderId, isReceived, user);
+        const status = response.success ? 200 : 400;
+        res.status(status).json(response);
+    });
 }
 
 module.exports = new OrderController();
