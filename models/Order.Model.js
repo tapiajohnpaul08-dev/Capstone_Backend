@@ -161,6 +161,7 @@ const orderSchema = new mongoose.Schema({
   deliveryMethod: { type: String, enum: ["Delivery", "Pick-up"] },
   supplyType: { type: String, enum: ["Own Items", "Company Cups"] },
   type: { type: String, enum: ["own-items", "company-product"] },
+  
   productionSchedule: { type: Date, default: null },
   driverDetails: driverDetailsSchema,
   isProvided: { type: Boolean, default: false },
@@ -181,6 +182,8 @@ const orderSchema = new mongoose.Schema({
     type: Date,
     required: false,
   },
+
+  fromCustomerToCompanyDeliveryDate:{ type: Date, default: null },
   orderedAt: { type: Date, default: Date.now },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },

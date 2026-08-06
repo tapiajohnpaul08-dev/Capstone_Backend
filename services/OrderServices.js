@@ -125,6 +125,7 @@ class OrderService {
           receivingMode: payload.receivingMode,
           expectedDelivery,
           preferredDate: payload.preferredDate || null,
+          fromCustomerToCompanyDeliveryDate: payload.fromCustomerToCompanyDeliveryDate || null,
           isProvided: true,
           orderedBy: orderedById,
           notes: payload.notes || "Customer provided items for printing",

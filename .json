@@ -1,0 +1,59 @@
+{
+    "id": "ORD-2026-457-3091-PROV",
+    "orderId": "ORD-2026-457-3091-PROV",
+    "orderNumber": "ORD-2026-457-3091-PROV",
+    "status": "Pending",
+    "statusValue": "pending",
+    "paymentStatus": "Unpaid",
+    "isProvided": true,
+    "supplyType": "Own Cups",
+    "deliveryMethod": "Delivery",
+    "totalAmount": 0,
+    "quantity": 500,
+    "image": null,
+    "date": "8/7/2026",
+    "createdAt": "2026-08-06T17:33:03.100Z",
+    "items": [
+        {
+            "productId": null,
+            "name": "Tumbler",
+            "category": "Customer Provided",
+            "size": "1L",
+            "quantity": 500,
+            "estimatedTotal": 0,
+            "design": {
+                "source": "saved",
+                "printSize": "3x3",
+                "printPlacement": "Full-Wrap",
+                "designNotes": "",
+                "files": []
+            }
+        }
+    ],
+    "customerName": "Junebert Hachero",
+    "customerEmail": "braceroroxanne@gmail.com",
+    "customerPhone": "09709406573",
+    "address": "Bustos Bulacan",
+    "postalCode": "3007",
+    "company": "Jear Corp",
+    "fulfillment": {
+        "deliveryAddress": "",
+        "sameAsCustomer": false
+    },
+    "designDetails": [],
+    "expectedDelivery": "8/17/2026",
+    "fromCustomerToCompanyDeliveryDate": "2026-08-13T00:00:00.000Z",
+    "preferredDate": null,
+    "preferredTime": "",
+    "productionSchedule": null,
+    "notes": "Individual Designs | Items: ",
+    "statusHistory": [
+        {
+            "status": "Pending",
+            "timestamp": "2026-08-06T17:33:03.091Z",
+            "notes": "Order created (customer provided items)",
+            "productionSchedule": "",
+            "updatedBy": "6a703e836247a31a29e6a49b"
+        }
+    ]
+}
