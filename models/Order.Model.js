@@ -1,16 +1,6 @@
 // models/Order.Model.js
 const mongoose = require("mongoose");
 
-const fileMetaSchema = new mongoose.Schema(
-  {
-    name: { type: String, default: "" },
-    size: { type: Number, default: 0 },
-    type: { type: String, default: "" },
-    path: { type: String, default: "" },
-  },
-  { _id: false },
-);
-
 const designDetailsSchema = new mongoose.Schema({
   designSource: { type: String, enum: ["upload", "saved", "no-design"] },
   printSize: { type: String },
@@ -25,7 +15,7 @@ const designDetailsSchema = new mongoose.Schema({
     },
   ],
   imagePaths: { type: [String], default: [] },
-  selectedTemplateId: { type: String }, // ← CHANGE from ObjectId to String
+  selectedTemplateId: { type: String },
   selectedTemplate: {
     id: { type: String },
     name: String,
@@ -43,8 +33,7 @@ const orderItemSchema = new mongoose.Schema({
   size: { type: String },
   quantity: { type: Number, required: true },
   designSource: { type: String, enum: ["upload", "saved", "no-design"] },
-  designImage: { type: String, default: "" }, // Add this if not exists
-
+  designImage: { type: String, default: "" },
   printSize: { type: String },
   printPlacement: { type: String },
   designNotes: { type: String },
@@ -56,9 +45,8 @@ const orderItemSchema = new mongoose.Schema({
       path: { type: String, default: "" },
     },
   ],
-  selectedTemplateId: { type: String }, // ← CHANGE from ObjectId to String
+  selectedTemplateId: { type: String },
   selectedTemplate: {
-    // ← ADD this if not exists
     id: { type: String },
     name: String,
     thumbnail: String,
@@ -70,16 +58,36 @@ const orderItemSchema = new mongoose.Schema({
   image: { type: String },
 });
 
-const statusHistorySchema = new mongoose.Schema({
-  status: { type: String },
-  timestamp: { type: Date, default: Date.now },
-  notes: { type: String },
-  productionSchedule: { type: String, default: "" },
-  updatedBy: { type: String },
-});
+const statusHistorySchema = new mongoose.Schema(
+  {
+    status: { type: String },
+    timestamp: { type: Date, default: Date.now },
+    notes: { type: String },
+    productionSchedule: { type: String, default: "" },
+    updatedBy: { type: String },
+    // Snapshot of the driver at the time of this status change, so the
+    // history keeps an accurate record even if the driver is later
+    // reassigned or their info changes.
+    driverDetails: {
+      driverName: { type: String },
+      driverPhone: { type: String },
+      plateNumber: { type: String },
+      truckDescription: { type: String },
+    },
+  },
+  { _id: false },
+);
 
+// FIX: `driverId` was missing here. OrderService.updateOrderStatus sets
+// `order.driverDetails.driverId = driver.driverId`, but because this schema
+// didn't declare that field, Mongoose silently stripped it before saving
+// (strict mode default). That meant `order.driverDetails.driverId` was
+// always undefined on read, breaking driver-release logic in
+// updateOrderStatus/deleteOrder (DriverService.decrementAssignedOrders was
+// effectively never called with a real ID for previously-saved orders).
 const driverDetailsSchema = new mongoose.Schema(
   {
+    driverId: { type: String, default: "" },
     driverName: { type: String, default: "" },
     driverPhone: { type: String, default: "" },
     plateNumber: { type: String, default: "" },
@@ -89,11 +97,14 @@ const driverDetailsSchema = new mongoose.Schema(
   { _id: false },
 );
 
-const partialPaymentSchema = new mongoose.Schema({
-  amount: { type: Number },
-  date: { type: Date, default: Date.now },
-  updatedBy: { type: String },
-});
+const partialPaymentSchema = new mongoose.Schema(
+  {
+    amount: { type: Number, required: true },
+    date: { type: Date, default: Date.now },
+    updatedBy: { type: String },
+  },
+  { _id: false },
+);
 
 const orderSchema = new mongoose.Schema({
   orderId: { type: String, unique: true },
@@ -111,6 +122,12 @@ const orderSchema = new mongoose.Schema({
   items: [orderItemSchema],
   amount: { type: Number, default: 0 },
   totalAmount: { type: Number, default: 0 },
+  // NOTE: "Ready to Pick-up" is intentionally NOT a DB status. It is a
+  // *display-only* alias for "Out for Delivery" shown to admins when
+  // receivingMode === "Pick-up" (see frontend composables/useOrderStatus.js
+  // getDisplayStatus/toDbStatus). Storing "Ready to Pick-up" directly here
+  // would fragment order-status statistics/queries (getOrderStatistics,
+  // filters, etc. all query on "Out for Delivery").
   status: {
     type: String,
     enum: [
@@ -128,7 +145,6 @@ const orderSchema = new mongoose.Schema({
     enum: ["Unpaid", "Partial", "Paid"],
     default: "Unpaid",
   },
-  // Add to orderSchema
   paymentMethod: {
     type: String,
     enum: ["cod", "bank_transfer"],
@@ -152,7 +168,10 @@ const orderSchema = new mongoose.Schema({
   source: { type: String },
   orderedBy: { type: String },
   orderedById: { type: String },
-  expectedDelivery: { type: Date },
+
+  // FIX: `expectedDelivery` was declared twice in the original schema
+  // (once optional, once `required: true`) - a duplicate object key where
+  // the second definition silently wins in JS. Keeping a single definition.
   expectedDelivery: {
     type: Date,
     required: true,
@@ -161,18 +180,6 @@ const orderSchema = new mongoose.Schema({
   preferredDate: {
     type: Date,
     required: false,
-  },
-
-  preferredTime: {
-    type: String,
-    enum: [
-      "Morning (8AM - 12PM)",
-      "Afternoon (1PM - 5PM)",
-      "Evening (5PM - 8PM)",
-      "Anytime",
-      "",
-    ],
-    default: "",
   },
   orderedAt: { type: Date, default: Date.now },
   createdAt: { type: Date, default: Date.now },
@@ -196,10 +203,23 @@ const orderSchema = new mongoose.Schema({
   updatedBy: { type: String },
 });
 
+
+// ─── Indexes for frequently-queried fields ─────────────────────────────────
+// orderId already has a unique index via `unique: true` above.
 orderSchema.index({ customerEmail: 1 });
 orderSchema.index({ orderedBy: 1 });
 orderSchema.index({ status: 1 });
+orderSchema.index({ paymentStatus: 1 });
+orderSchema.index({ receivingMode: 1 });
 orderSchema.index({ createdAt: -1 });
-orderSchema.index({ orderNumber: 1 }, { unique: true, sparse: true });
+orderSchema.index({ orderedAt: -1 });
+// Compound index: the admin orders list is very commonly filtered by
+// status and sorted by most-recent first.
+orderSchema.index({ status: 1, orderedAt: -1 });
+
+// NOTE: removed the old `orderSchema.index({ orderNumber: 1 }, { unique:
+// true, sparse: true })` - `orderNumber` was never a field on this schema
+// (the real identifier field is `orderId`, already uniquely indexed above),
+// so that index was silently indexing a non-existent field.
 
 module.exports = mongoose.model("Order", orderSchema);

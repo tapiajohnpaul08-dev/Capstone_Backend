@@ -1,6 +1,8 @@
 const Conversation = require('../models/Conversation.Model');
 const Message = require('../models/Message.Model');
 const generateId = require('../utils/generateId');
+const { getPublicId } = require('../config/multer');
+
 
 class ChatService {
   
@@ -130,7 +132,11 @@ class ChatService {
   // ─────────────────────────────────────────
   // MESSAGES
   // ─────────────────────────────────────────
+
+
   
+  
+// In sendMessage method of ChatServices.js
 async sendMessage(conversationId, senderId, senderName, senderType, content, attachments = [], replyToMessageId = null) {
   try {
     const conversation = await Conversation.findOne({ conversationId });
@@ -140,49 +146,55 @@ async sendMessage(conversationId, senderId, senderName, senderType, content, att
     
     const isCustomer = senderType === 'customer';
     
-    console.log('📨 Service received replyToMessageId:', replyToMessageId);
+    // Handle attachments - ensure they have proper Cloudinary URLs
+    const processedAttachments = attachments.map(att => {
+      // If attachment has a Cloudinary path, use it
+      if (att.path && att.path.includes('cloudinary.com')) {
+        return {
+          ...att,
+          url: att.path,
+          publicId: att.public_id || getPublicId(att.path)
+        };
+      }
+      // If attachment has a URL
+      if (att.url && att.url.includes('cloudinary.com')) {
+        return {
+          ...att,
+          path: att.url,
+          url: att.url,
+          publicId: att.public_id || getPublicId(att.url)
+        };
+      }
+      return att;
+    });
     
     // If replying, get the original message
     let replyTo = null;
     if (replyToMessageId) {
       const originalMessage = await Message.findOne({ messageId: replyToMessageId });
-      console.log('📨 Original message found:', originalMessage ? 'YES' : 'NO');
       if (originalMessage && !originalMessage.isDeleted) {
         replyTo = {
           messageId: originalMessage.messageId,
           content: originalMessage.content || '📎 Attachment',
           sender: originalMessage.senderName || originalMessage.senderType
         };
-        console.log('📨 ReplyTo data set:', replyTo);
       }
     }
     
-    // In sendMessage method, when creating the message object:
-const message = new Message({
-  messageId: await generateId('MSG'),
-  conversationId,
-  senderType,
-  senderId,
-  senderName,
-  content,
-  attachments: attachments.map(att => {
-    // If attachment has a Cloudinary path, use it
-    if (att.path && att.path.includes('cloudinary.com')) {
-      return {
-        ...att,
-        url: att.path,
-        publicId: att.public_id || getPublicId(att.path)
-      };
-    }
-    return att;
-  }),
-  replyTo: replyTo,
-  replyToMessageId: replyToMessageId,
-  isDeleted: false
-});
+    const message = new Message({
+      messageId: await generateId('MSG'),
+      conversationId,
+      senderType,
+      senderId,
+      senderName,
+      content,
+      attachments: processedAttachments,
+      replyTo: replyTo,
+      replyToMessageId: replyToMessageId,
+      isDeleted: false
+    });
+    
     await message.save();
-    console.log('📨 Message saved with replyTo:', message.replyTo);
-    console.log('📨 Message saved with replyToMessageId:', message.replyToMessageId);
     
     // Update conversation
     conversation.lastMessage = content;
@@ -203,7 +215,6 @@ const message = new Message({
     
     await conversation.save();
     
-    // Return the full message with replyTo data
     const savedMessage = await Message.findOne({ messageId: message.messageId });
     
     return { success: true, data: savedMessage, conversation };
@@ -212,6 +223,8 @@ const message = new Message({
     throw error;
   }
 }
+
+
   // ─────────────────────────────────────────
   // UNSEND MESSAGE
   // ─────────────────────────────────────────

@@ -3,14 +3,6 @@ const multer = require('multer');
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const cloudinary = require('./cloudinary');
 const path = require('path');
-const fs = require('fs');
-
-// Ensure local upload directories exist (fallback)
-const ensureDirectoryExists = (dir) => {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-};
 
 // ──────────────────────────────────────────────
 // CLOUDINARY STORAGE CONFIGURATIONS
@@ -55,7 +47,7 @@ const designCloudStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
     folder: 'beverage/designs',
-    allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+    allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'pdf'],
     transformation: [
       { width: 1200, height: 1200, crop: 'limit', quality: 'auto' },
       { fetch_format: 'auto' }
@@ -87,84 +79,22 @@ const chatCloudStorage = new CloudinaryStorage({
 });
 
 // ──────────────────────────────────────────────
-// LOCAL STORAGE (FALLBACK)
-// ──────────────────────────────────────────────
-
-const productLocalStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const dir = path.join(__dirname, '../uploads/products');
-    ensureDirectoryExists(dir);
-    cb(null, dir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'product-' + uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
-const templateLocalStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const dir = path.join(__dirname, '../uploads/templates');
-    ensureDirectoryExists(dir);
-    cb(null, dir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'template-' + uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
-const designLocalStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const dir = path.join(__dirname, '../uploads/designs');
-    ensureDirectoryExists(dir);
-    cb(null, dir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'design-' + uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
-const chatLocalStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const dir = path.join(__dirname, '../uploads/chat');
-    ensureDirectoryExists(dir);
-    cb(null, dir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'chat-' + uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
-// ──────────────────────────────────────────────
-// STORAGE SELECTION (Cloudinary preferred)
-// ──────────────────────────────────────────────
-
-const useCloudinary = process.env.USE_CLOUDINARY === 'true' && 
-  process.env.CLOUDINARY_CLOUD_NAME && 
-  process.env.CLOUDINARY_API_KEY;
-
-console.log(`📦 Image storage: ${useCloudinary ? 'Cloudinary 🚀' : 'Local 💾'}`);
-
-// ──────────────────────────────────────────────
 // FILE FILTERS
 // ──────────────────────────────────────────────
 
 const imageFileFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|gif|webp/;
+  const allowedTypes = /jpeg|jpg|png|gif|webp|svg/;
   const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
   const mimetype = allowedTypes.test(file.mimetype);
   
   if (mimetype && extname) {
     return cb(null, true);
   }
-  cb(new Error('Only image files are allowed (.jpg, .jpeg, .png, .gif, .webp)'));
+  cb(new Error('Only image files are allowed (.jpg, .jpeg, .png, .gif, .webp, .svg)'));
 };
 
 const chatFileFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|gif|webp|pdf|doc|docx|txt|xlsx/;
+  const allowedTypes = /jpeg|jpg|png|gif|webp|pdf|doc|docx|txt|xlsx|svg/;
   const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
   const mimetype = allowedTypes.test(file.mimetype);
   
@@ -175,32 +105,73 @@ const chatFileFilter = (req, file, cb) => {
 };
 
 // ──────────────────────────────────────────────
-// MULTER INSTANCES
+// MULTER INSTANCES - ALWAYS USE CLOUDINARY
 // ──────────────────────────────────────────────
 
 const productUpload = multer({
-  storage: useCloudinary ? productCloudStorage : productLocalStorage,
+  storage: productCloudStorage, // ← Always Cloudinary
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
   fileFilter: imageFileFilter
 });
 
 const templateUpload = multer({
-  storage: useCloudinary ? templateCloudStorage : templateLocalStorage,
+  storage: templateCloudStorage, // ← Always Cloudinary
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: imageFileFilter
 });
 
 const designUpload = multer({
-  storage: useCloudinary ? designCloudStorage : designLocalStorage,
+  storage: designCloudStorage, // ← Always Cloudinary
   limits: { fileSize: 15 * 1024 * 1024 },
   fileFilter: imageFileFilter
 });
 
 const chatUpload = multer({
-  storage: useCloudinary ? chatCloudStorage : chatLocalStorage,
+  storage: chatCloudStorage, // ← Always Cloudinary
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: chatFileFilter
 });
+
+// ──────────────────────────────────────────────
+// UTILITY FUNCTIONS
+// ──────────────────────────────────────────────
+
+const getPublicId = (url) => {
+  if (!url) return null;
+  const match = url.match(/\/v\d+\/([^.]+)/);
+  return match ? match[1] : null;
+};
+
+const deleteImage = async (publicId) => {
+  if (!publicId) return null;
+  try {
+    return await cloudinary.uploader.destroy(publicId);
+  } catch (error) {
+    console.error('Error deleting from Cloudinary:', error);
+    return null;
+  }
+};
+
+const getOptimizedUrl = (url, options = {}) => {
+  if (!url) return null;
+  if (!url.includes('cloudinary.com')) return url;
+  
+  const { width, height, crop = 'limit', quality = 'auto' } = options;
+  const transformations = [];
+  
+  if (width || height) {
+    transformations.push(`c_${crop},w_${width || ''},h_${height || ''}`);
+  }
+  if (quality) transformations.push(`q_${quality}`);
+  transformations.push('f_auto');
+  
+  if (transformations.length === 0) return url;
+  
+  const parts = url.split('/upload/');
+  if (parts.length !== 2) return url;
+  
+  return `${parts[0]}/upload/${transformations.join(',')}/${parts[1]}`;
+};
 
 // ──────────────────────────────────────────────
 // EXPORT
@@ -212,49 +183,12 @@ module.exports = {
   designUpload,
   chatUpload,
   cloudinary,
-  useCloudinary,
-  
-  // Utility functions
+  useCloudinary: true, // Always true now
   getImageUrl: (file) => {
     if (!file) return null;
-    // Cloudinary returns the URL in file.path
-    return file.path || file.url || `/uploads/${file.filename}`;
+    return file.path || file.url || null;
   },
-  
-  getPublicId: (url) => {
-    if (!url) return null;
-    const match = url.match(/\/v\d+\/([^.]+)/);
-    return match ? match[1] : null;
-  },
-  
-  deleteImage: async (publicId) => {
-    if (!useCloudinary || !publicId) return null;
-    try {
-      return await cloudinary.uploader.destroy(publicId);
-    } catch (error) {
-      console.error('Error deleting from Cloudinary:', error);
-      return null;
-    }
-  },
-  
-  getOptimizedUrl: (url, options = {}) => {
-    if (!url) return null;
-    if (!useCloudinary || !url.includes('cloudinary.com')) return url;
-    
-    const { width, height, crop = 'limit', quality = 'auto' } = options;
-    const transformations = [];
-    
-    if (width || height) {
-      transformations.push(`c_${crop},w_${width || ''},h_${height || ''}`);
-    }
-    if (quality) transformations.push(`q_${quality}`);
-    transformations.push('f_auto');
-    
-    if (transformations.length === 0) return url;
-    
-    const parts = url.split('/upload/');
-    if (parts.length !== 2) return url;
-    
-    return `${parts[0]}/upload/${transformations.join(',')}/${parts[1]}`;
-  }
+  getPublicId,
+  deleteImage,
+  getOptimizedUrl
 };

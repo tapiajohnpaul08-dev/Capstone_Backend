@@ -1,8 +1,7 @@
 // services/CustomerTemplateService.js
 const Customer = require('../models/Customer.Model');
 const generateId = require('../utils/generateId');
-const path = require('path');
-const fs = require('fs');
+const cloudinary = require('../config/cloudinary');
 
 class CustomerTemplateService {
   
@@ -62,8 +61,8 @@ class CustomerTemplateService {
     }
   }
   
-// ─────────────────────────────────────────
-  // CREATE TEMPLATE
+  // ─────────────────────────────────────────
+  // CREATE TEMPLATE - WITH CLOUDINARY
   // ─────────────────────────────────────────
   async createTemplate(customerId, templateData, imageFile = null) {
     try {
@@ -76,38 +75,30 @@ class CustomerTemplateService {
       let imagePath = '';
       let imagePublicId = null;
       
-      // Ensure uploads/templates directory exists (for local fallback)
-      const templatesDir = path.join(__dirname, '../uploads/templates');
-      if (!fs.existsSync(templatesDir)) {
-        fs.mkdirSync(templatesDir, { recursive: true });
-      }
-      
+      // ✅ If imageFile exists, it's already uploaded to Cloudinary via multer
       if (imageFile) {
-        // Cloudinary or local upload
+        // Cloudinary stores the URL in file.path
         if (imageFile.path) {
           imagePath = imageFile.path;
-          imagePublicId = imageFile.public_id || getPublicId(imageFile.path);
+          imagePublicId = imageFile.public_id || this.getPublicIdFromUrl(imageFile.path);
         } else if (imageFile.filename) {
+          // Fallback for local storage (should not happen with Cloudinary)
           imagePath = `/uploads/templates/${imageFile.filename}`;
         }
       } else if (templateData.existingImagePath) {
-        // Copy from existing design file (local only)
-        const sourcePath = path.join(__dirname, '..', templateData.existingImagePath);
-        const ext = path.extname(sourcePath);
-        const filename = 'template-' + Date.now() + '-' + Math.round(Math.random() * 1E9) + ext;
-        const destPath = path.join(__dirname, '../uploads/templates', filename);
-        
-        if (fs.existsSync(sourcePath)) {
-          const destDir = path.dirname(destPath);
-          if (!fs.existsSync(destDir)) {
-            fs.mkdirSync(destDir, { recursive: true });
-          }
-          fs.copyFileSync(sourcePath, destPath);
-          imagePath = `/uploads/templates/${filename}`;
+        // ✅ If we have an existing image path, check if it's already a Cloudinary URL
+        if (templateData.existingImagePath.startsWith('http://') || 
+            templateData.existingImagePath.startsWith('https://')) {
+          // Already a Cloudinary URL
+          imagePath = templateData.existingImagePath;
+          imagePublicId = this.getPublicIdFromUrl(templateData.existingImagePath);
         } else {
-          imagePath = '/uploads/templates/default-template.jpg';
+          // Local path - we need to upload to Cloudinary first
+          // For now, store as is (it will be a local path)
+          imagePath = templateData.existingImagePath;
         }
       } else {
+        // Default template image
         imagePath = '/uploads/templates/default-template.jpg';
       }
       
@@ -154,19 +145,19 @@ class CustomerTemplateService {
       
       // Handle image update
       if (imageFile) {
-        // Delete old image if exists and not default
-        const oldImage = customer.templateDesigns[templateIndex].imagePath;
-        if (oldImage && oldImage !== '/uploads/templates/default-template.jpg') {
-          const oldImagePath = path.join(__dirname, '..', oldImage);
-          if (fs.existsSync(oldImagePath)) {
-            fs.unlinkSync(oldImagePath);
-          }
+        // Delete old image from Cloudinary if it exists
+        const oldImage = customer.templateDesigns[templateIndex];
+        if (oldImage.imagePublicId) {
+          await this.deleteImageFromCloudinary(oldImage.imagePublicId);
         }
-        updateData.imagePath = `/uploads/templates/${imageFile.filename}`;
+        
+        // Set new Cloudinary URL
+        updateData.imagePath = imageFile.path || imageFile.url;
+        updateData.imagePublicId = imageFile.public_id || this.getPublicIdFromUrl(imageFile.path || imageFile.url);
       }
       
       // Update fields
-      const allowedUpdates = ['name', 'imagePath', 'printSize', 'placement', 'notes'];
+      const allowedUpdates = ['name', 'imagePath', 'imagePublicId', 'printSize', 'placement', 'notes'];
       allowedUpdates.forEach(field => {
         if (updateData[field] !== undefined) {
           customer.templateDesigns[templateIndex][field] = updateData[field];
@@ -187,8 +178,8 @@ class CustomerTemplateService {
     }
   }
   
- // ─────────────────────────────────────────
-  // DELETE TEMPLATE
+  // ─────────────────────────────────────────
+  // DELETE TEMPLATE - With Cloudinary cleanup
   // ─────────────────────────────────────────
   async deleteTemplate(customerId, templateId) {
     try {
@@ -204,14 +195,9 @@ class CustomerTemplateService {
         return { success: false, message: 'Template not found' };
       }
       
-      // Delete associated image
+      // ✅ Delete associated image from Cloudinary
       if (template.imagePublicId) {
-        await deleteImage(template.imagePublicId);
-      } else if (template.imagePath && template.imagePath !== '/uploads/templates/default-template.jpg') {
-        const imagePath = path.join(__dirname, '..', template.imagePath);
-        if (fs.existsSync(imagePath)) {
-          fs.unlinkSync(imagePath);
-        }
+        await this.deleteImageFromCloudinary(template.imagePublicId);
       }
       
       customer.templateDesigns = customer.templateDesigns.filter(t => t.templateId !== templateId);
@@ -228,11 +214,66 @@ class CustomerTemplateService {
   }
 
   // ─────────────────────────────────────────
+  // HELPER: Get public ID from Cloudinary URL
+  // ─────────────────────────────────────────
+  getPublicIdFromUrl(url) {
+    if (!url) return null;
+    // Match the public ID from Cloudinary URL
+    // Example: https://res.cloudinary.com/cloud_name/image/upload/v1234567890/beverage/templates/template-12345
+    const match = url.match(/\/v\d+\/([^.]+)/);
+    return match ? match[1] : null;
+  }
+
+  // ─────────────────────────────────────────
+  // HELPER: Delete image from Cloudinary
+  // ─────────────────────────────────────────
+  async deleteImageFromCloudinary(publicId) {
+    if (!publicId) return null;
+    try {
+      const result = await cloudinary.uploader.destroy(publicId);
+      console.log('✅ Deleted from Cloudinary:', publicId);
+      return result;
+    } catch (error) {
+      console.error('Error deleting from Cloudinary:', error);
+      return null;
+    }
+  }
+
+  // ─────────────────────────────────────────
   // GET OPTIMIZED TEMPLATE IMAGE URL
   // ─────────────────────────────────────────
   getOptimizedTemplateImage(template, options = {}) {
     if (!template || !template.imagePath) return null;
-    return getOptimizedUrl(template.imagePath, options);
+    
+    // If it's a Cloudinary URL, add transformations
+    if (template.imagePath.includes('cloudinary.com')) {
+      return this.getOptimizedCloudinaryUrl(template.imagePath, options);
+    }
+    return template.imagePath;
+  }
+
+  // ─────────────────────────────────────────
+  // HELPER: Get optimized Cloudinary URL
+  // ─────────────────────────────────────────
+  getOptimizedCloudinaryUrl(url, options = {}) {
+    if (!url) return null;
+    if (!url.includes('cloudinary.com')) return url;
+    
+    const { width, height, crop = 'limit', quality = 'auto' } = options;
+    const transformations = [];
+    
+    if (width || height) {
+      transformations.push(`c_${crop},w_${width || ''},h_${height || ''}`);
+    }
+    if (quality) transformations.push(`q_${quality}`);
+    transformations.push('f_auto');
+    
+    if (transformations.length === 0) return url;
+    
+    const parts = url.split('/upload/');
+    if (parts.length !== 2) return url;
+    
+    return `${parts[0]}/upload/${transformations.join(',')}/${parts[1]}`;
   }
   
   // Save design from order as template
