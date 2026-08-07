@@ -80,7 +80,7 @@ class OrderService {
       let expectedDelivery;
       if (payload.preferredDate) {
         expectedDelivery = new Date(payload.preferredDate);
-        const minDate = this.getBusinessDaysFromToday(5);
+        const minDate = this.getBusinessDaysFromToday(3);
         if (expectedDelivery < minDate) expectedDelivery = minDate;
         const maxDate = this.getBusinessDaysFromToday(7);
         if (expectedDelivery > maxDate) expectedDelivery = maxDate;
@@ -254,7 +254,7 @@ class OrderService {
             orderedBy: orderedById,
             notes: payload.notes || `Order with ${processedItems.length} item(s)`,
             statusHistory: [
-              { status: "Pending", timestamp: new Date(), notes: "Order created", updatedBy: orderedById },
+              { status: "Pending", timestamp: new Date(), notes: "Order created", updatedBy: null },
             ],
             customer: {
               name: customerName,
