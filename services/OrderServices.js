@@ -954,6 +954,7 @@ class OrderService {
 
       if (isReceived) {
         order.status = "Completed";
+        order.paymentStatus = "Paid"; // Mark as paid when received
         order.statusHistory.push({
           status: "Completed",
           timestamp: new Date(),
