@@ -14,37 +14,77 @@ class AnalyticsService {
         return { start, end };
     }
 
+    // ─── Helper: Completed orders filter ───────────────────────────────────
+    _completedOrdersFilter(start, end) {
+        return {
+            status: 'Completed',
+            orderedAt: { $gte: start, $lte: end }
+        };
+    }
+
+    // ─── Helper: All orders filter (for status distribution) ──────────────
+    _allOrdersFilter(start, end) {
+        return {
+            orderedAt: { $gte: start, $lte: end }
+        };
+    }
+
     // ─── Stats ─────────────────────────────────────────────────────────────
     async getAnalyticsStats(dateFrom, dateTo) {
         try {
             const { start, end } = this._buildDateRange(dateFrom, dateTo);
-            const dateFilter = { orderedAt: { $gte: start, $lte: end } };
+            const completedFilter = this._completedOrdersFilter(start, end);
+            const allOrdersFilter = this._allOrdersFilter(start, end);
 
             // Previous period (same duration)
             const duration = end - start;
             const prevEnd   = new Date(start - 1);
             const prevStart = new Date(start - duration - 1);
-            const prevFilter = { orderedAt: { $gte: prevStart, $lte: prevEnd } };
+            const prevCompletedFilter = this._completedOrdersFilter(prevStart, prevEnd);
+            const prevAllOrdersFilter = this._allOrdersFilter(prevStart, prevEnd);
 
-            const [revenueStats, prevRevenueStats, orderCounts, prevOrderCounts, uniqueCustomers, prevCustomers] = await Promise.all([
+            const [
+                revenueStats,
+                prevRevenueStats,
+                orderCounts,
+                prevOrderCounts,
+                uniqueCustomers,
+                prevCustomers,
+                orderStatusDistribution
+            ] = await Promise.all([
+                // ✅ Revenue from COMPLETED orders only
                 Order.aggregate([
-                    { $match: { ...dateFilter, status: 'Completed', paymentStatus: 'Paid' } },
-                    { $group: { _id: null, totalRevenue: { $sum: '$amount' }, avgOrderValue: { $avg: '$amount' } } }
+                    { $match: completedFilter },
+                    { $group: { 
+                        _id: null, 
+                        totalRevenue: { $sum: '$amount' }, 
+                        avgOrderValue: { $avg: '$amount' } 
+                    } }
                 ]),
+                // ✅ Previous period revenue
                 Order.aggregate([
-                    { $match: { ...prevFilter, status: 'Completed', paymentStatus: 'Paid' } },
+                    { $match: prevCompletedFilter },
                     { $group: { _id: null, totalRevenue: { $sum: '$amount' } } }
                 ]),
+                // ✅ Order counts for ALL orders (for status breakdown)
                 Order.aggregate([
-                    { $match: dateFilter },
+                    { $match: allOrdersFilter },
                     { $group: { _id: '$status', count: { $sum: 1 } } }
                 ]),
+                // ✅ Previous period order count (ALL orders)
                 Order.aggregate([
-                    { $match: prevFilter },
+                    { $match: prevAllOrdersFilter },
                     { $group: { _id: null, count: { $sum: 1 } } }
                 ]),
-                Order.distinct('customerEmail', dateFilter),
-                Order.distinct('customerEmail', prevFilter),
+                // ✅ Unique customers from COMPLETED orders only
+                Order.distinct('customerEmail', completedFilter),
+                // ✅ Previous period unique customers
+                Order.distinct('customerEmail', prevCompletedFilter),
+                // ✅ Status distribution for ALL orders
+                Order.aggregate([
+                    { $match: allOrdersFilter },
+                    { $group: { _id: '$status', count: { $sum: 1 } } }
+                ])
             ]);
 
             const totalRevenue = revenueStats[0]?.totalRevenue || 0;
@@ -54,12 +94,36 @@ class AnalyticsService {
 
             const pctChange = (curr, prev) => prev === 0 ? null : Math.round(((curr - prev) / prev) * 100);
 
+            // ✅ Count completed orders only
+            const completedOrders = orderCounts.find(s => s._id === 'Completed')?.count || 0;
+            const pendingOrders = orderCounts.find(s => s._id === 'Pending')?.count || 0;
+            const scheduledOrders = orderCounts.find(s => s._id === 'Scheduled')?.count || 0;
+            const inProductionOrders = orderCounts.find(s => s._id === 'In Production')?.count || 0;
+            const outForDeliveryOrders = orderCounts.find(s => s._id === 'Out for Delivery')?.count || 0;
+            const cancelledOrders = orderCounts.find(s => s._id === 'Cancelled')?.count || 0;
+
+            // ✅ Low stock products
             const allProducts = await Product.find({});
             let lowStockProducts = 0;
+            let outOfStockProducts = 0;
             for (const p of allProducts) {
                 const total = p.sizes.reduce((s, z) => s + (z.stock || 0), 0);
-                if (total > 0 && total < 100) lowStockProducts++;
+                if (total === 0) outOfStockProducts++;
+                else if (total > 0 && total < 100) lowStockProducts++;
             }
+
+            // ✅ Total products count
+            const totalProducts = await Product.countDocuments();
+
+            // ✅ Total supplies
+            const totalSupplies = await Supply.countDocuments();
+            const lowStockSupplies = await InventoryItem.countDocuments({ 
+                itemType: 'supply', 
+                stock: { $gt: 0, $lt: 100 } 
+            });
+
+            // ✅ Completed orders count for conversion rate
+            const totalCompletedOrders = await Order.countDocuments({ status: 'Completed' });
 
             return {
                 success: true,
@@ -71,19 +135,22 @@ class AnalyticsService {
                     },
                     orders: {
                         total: totalOrders,
-                        pending:   orderCounts.find(s => s._id === 'Pending')?.count   || 0,
-                        completed: orderCounts.find(s => s._id === 'Completed')?.count || 0,
-                        cancelled: orderCounts.find(s => s._id === 'Cancelled')?.count || 0,
+                        completed: completedOrders,
+                        pending: pendingOrders,
+                        scheduled: scheduledOrders,
+                        inProduction: inProductionOrders,
+                        outForDelivery: outForDeliveryOrders,
+                        cancelled: cancelledOrders,
                         change: pctChange(totalOrders, prevOrders)
                     },
                     products: {
-                        total: await Product.countDocuments(),
+                        total: totalProducts,
                         lowStock: lowStockProducts,
-                        outOfStock: 0
+                        outOfStock: outOfStockProducts
                     },
                     supplies: {
-                        total: await Supply.countDocuments(),
-                        lowStock: await InventoryItem.countDocuments({ itemType: 'supply', stock: { $gt: 0, $lt: 100 } })
+                        total: totalSupplies,
+                        lowStock: lowStockSupplies
                     },
                     customers: {
                         total: uniqueCustomers.length,
@@ -102,9 +169,29 @@ class AnalyticsService {
     async getTopProducts(limit = 5, dateFrom, dateTo) {
         try {
             const { start, end } = this._buildDateRange(dateFrom, dateTo);
+            // ✅ Only include COMPLETED orders
             const topProducts = await Order.aggregate([
-                { $match: { isProvided: false, productName: { $exists: true, $ne: null }, orderedAt: { $gte: start, $lte: end } } },
-                { $group: { _id: '$productName', totalQuantity: { $sum: '$quantity' }, totalRevenue: { $sum: '$amount' }, orderCount: { $sum: 1 } } },
+                { 
+                    $match: { 
+                        isProvided: false, 
+                        status: 'Completed',
+                        'items.name': { $exists: true, $ne: null },
+                        orderedAt: { $gte: start, $lte: end } 
+                    } 
+                },
+                // Unwind items to get individual product sales
+                { $unwind: '$items' },
+                { 
+                    $group: { 
+                        _id: '$items.name', 
+                        totalQuantity: { $sum: '$items.quantity' }, 
+                        totalRevenue: { $sum: '$items.estimatedTotal' }, 
+                        orderCount: { $sum: 1 },
+                        productId: { $first: '$items.productId' },
+                        category: { $first: '$items.category' },
+                        image: { $first: '$items.image' }
+                    } 
+                },
                 { $sort: { totalQuantity: -1 } },
                 { $limit: limit }
             ]);
@@ -119,16 +206,22 @@ class AnalyticsService {
     async getOrderStatusDistribution(dateFrom, dateTo) {
         try {
             const { start, end } = this._buildDateRange(dateFrom, dateTo);
+            // ✅ Include ALL orders for status distribution
             const distribution = await Order.aggregate([
                 { $match: { orderedAt: { $gte: start, $lte: end } } },
                 { $group: { _id: '$status', value: { $sum: 1 } } }
             ]);
             const statusColors = {
-                'Pending': '#f59e0b', 'Scheduled': '#8b5cf6', 'In Production': '#3b82f6',
-                'Out for Delivery': '#06b6d4', 'Completed': '#10b981', 'Cancelled': '#ef4444'
+                'Pending': '#f59e0b', 
+                'Scheduled': '#8b5cf6', 
+                'In Production': '#3b82f6',
+                'Out for Delivery': '#06b6d4', 
+                'Completed': '#10b981', 
+                'Cancelled': '#ef4444'
             };
             const result = distribution.map(item => ({
-                label: item._id, value: item.value,
+                label: item._id, 
+                value: item.value,
                 color: statusColors[item._id] || '#6b7280'
             }));
             return { success: true, data: result };
@@ -142,14 +235,42 @@ class AnalyticsService {
     async getRevenueByCategory(dateFrom, dateTo) {
         try {
             const { start, end } = this._buildDateRange(dateFrom, dateTo);
+            // ✅ Only include COMPLETED orders
             const revenue = await Order.aggregate([
-                { $match: { isProvided: false, orderedAt: { $gte: start, $lte: end } } },
-                { $lookup: { from: 'products', localField: 'productId', foreignField: 'id', as: 'product' } },
+                { 
+                    $match: { 
+                        isProvided: false, 
+                        status: 'Completed',
+                        orderedAt: { $gte: start, $lte: end } 
+                    } 
+                },
+                { $unwind: '$items' },
+                { 
+                    $lookup: { 
+                        from: 'products', 
+                        localField: 'items.productId', 
+                        foreignField: 'id', 
+                        as: 'product' 
+                    } 
+                },
                 { $unwind: { path: '$product', preserveNullAndEmptyArrays: true } },
-                { $group: { _id: { $ifNull: ['$product.category', 'Other'] }, revenue: { $sum: '$amount' }, orders: { $sum: 1 } } },
+                { 
+                    $group: { 
+                        _id: { $ifNull: ['$product.category', '$items.category'] }, 
+                        revenue: { $sum: '$items.estimatedTotal' }, 
+                        orders: { $sum: 1 } 
+                    } 
+                },
                 { $sort: { revenue: -1 } }
             ]);
-            return { success: true, data: revenue.map(item => ({ name: item._id, revenue: item.revenue, orders: item.orders })) };
+            return { 
+                success: true, 
+                data: revenue.map(item => ({ 
+                    name: item._id || 'Other', 
+                    revenue: item.revenue, 
+                    orders: item.orders 
+                })) 
+            };
         } catch (error) {
             console.error('Error getting revenue by category:', error);
             throw error;
@@ -165,12 +286,22 @@ class AnalyticsService {
             startDate.setDate(1);
             startDate.setHours(0, 0, 0, 0);
 
+            // ✅ Only include COMPLETED orders
             const monthlyData = await Order.aggregate([
-                { $match: { orderedAt: { $gte: startDate, $lte: endDate }, isProvided: false } },
-                { $group: {
-                    _id: { year: { $year: '$orderedAt' }, month: { $month: '$orderedAt' } },
-                    revenue: { $sum: '$amount' }, orders: { $sum: 1 }
-                }},
+                { 
+                    $match: { 
+                        orderedAt: { $gte: startDate, $lte: endDate }, 
+                        isProvided: false,
+                        status: 'Completed' 
+                    } 
+                },
+                { 
+                    $group: {
+                        _id: { year: { $year: '$orderedAt' }, month: { $month: '$orderedAt' } },
+                        revenue: { $sum: '$amount' }, 
+                        orders: { $sum: 1 }
+                    }
+                },
                 { $sort: { '_id.year': 1, '_id.month': 1 } }
             ]);
 
@@ -178,10 +309,16 @@ class AnalyticsService {
             const now = new Date();
             const result = [];
             for (let i = months - 1; i >= 0; i--) {
-                const d = new Date(); d.setMonth(now.getMonth() - i);
+                const d = new Date(); 
+                d.setMonth(now.getMonth() - i);
                 const year = d.getFullYear(), month = d.getMonth();
                 const found = monthlyData.find(x => x._id.year === year && x._id.month === month + 1);
-                result.push({ month: monthNames[month], year, revenue: found?.revenue || 0, orders: found?.orders || 0 });
+                result.push({ 
+                    month: monthNames[month], 
+                    year, 
+                    revenue: found?.revenue || 0, 
+                    orders: found?.orders || 0 
+                });
             }
             return { success: true, data: result };
         } catch (error) {
@@ -199,9 +336,22 @@ class AnalyticsService {
             else if (groupBy === 'week') groupId = { year: { $year: '$orderedAt' }, week: { $isoWeek: '$orderedAt' } };
             else groupId = { year: { $year: '$orderedAt' }, month: { $month: '$orderedAt' } };
 
+            // ✅ Only include COMPLETED orders
             const data = await Order.aggregate([
-                { $match: { orderedAt: { $gte: start, $lte: end }, isProvided: false } },
-                { $group: { _id: groupId, revenue: { $sum: '$amount' }, orders: { $sum: 1 } } },
+                { 
+                    $match: { 
+                        orderedAt: { $gte: start, $lte: end }, 
+                        isProvided: false,
+                        status: 'Completed' 
+                    } 
+                },
+                { 
+                    $group: { 
+                        _id: groupId, 
+                        revenue: { $sum: '$amount' }, 
+                        orders: { $sum: 1 } 
+                    } 
+                },
                 { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1 } }
             ]);
             return { success: true, data };
@@ -214,14 +364,29 @@ class AnalyticsService {
     // ─── Revenue forecast (simple linear regression) ──────────────────────
     async getRevenueForecast() {
         try {
-            // Get last 6 months as basis
+            // Get last 6 months of COMPLETED orders as basis
             const endDate = new Date();
-            const startDate = new Date(); startDate.setMonth(startDate.getMonth() - 6);
+            const startDate = new Date(); 
+            startDate.setMonth(startDate.getMonth() - 6);
+            
+            // ✅ Only include COMPLETED orders
             const monthlyData = await Order.aggregate([
-                { $match: { orderedAt: { $gte: startDate, $lte: endDate }, isProvided: false } },
-                { $group: { _id: { year: { $year: '$orderedAt' }, month: { $month: '$orderedAt' } }, revenue: { $sum: '$amount' } } },
+                { 
+                    $match: { 
+                        orderedAt: { $gte: startDate, $lte: endDate }, 
+                        isProvided: false,
+                        status: 'Completed' 
+                    } 
+                },
+                { 
+                    $group: { 
+                        _id: { year: { $year: '$orderedAt' }, month: { $month: '$orderedAt' } }, 
+                        revenue: { $sum: '$amount' } 
+                    } 
+                },
                 { $sort: { '_id.year': 1, '_id.month': 1 } }
             ]);
+            
             // Linear regression
             const n = monthlyData.length;
             if (n < 2) return { success: true, data: [] };
@@ -237,9 +402,15 @@ class AnalyticsService {
             const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
             const forecast = [];
             for (let i = 1; i <= 3; i++) {
-                const d = new Date(); d.setMonth(d.getMonth() + i);
+                const d = new Date(); 
+                d.setMonth(d.getMonth() + i);
                 const pred = Math.max(0, Math.round(intercept + slope * (n - 1 + i)));
-                forecast.push({ month: monthNames[d.getMonth()], year: d.getFullYear(), revenue: pred, isForecast: true });
+                forecast.push({ 
+                    month: monthNames[d.getMonth()], 
+                    year: d.getFullYear(), 
+                    revenue: pred, 
+                    isForecast: true 
+                });
             }
             return { success: true, data: forecast };
         } catch (error) {
@@ -279,21 +450,109 @@ class AnalyticsService {
     // ─── Top customers ────────────────────────────────────────────────────
     async getTopCustomers(limit = 10) {
         try {
+            // ✅ Only include COMPLETED orders
             const customers = await Order.aggregate([
-                { $match: { customerEmail: { $exists: true, $ne: null } } },
-                { $group: {
-                    _id: '$customerEmail',
-                    name: { $first: '$customerName' },
-                    totalSpent: { $sum: '$amount' },
-                    totalOrders: { $sum: 1 },
-                    lastOrder: { $max: '$orderedAt' }
-                }},
+                { 
+                    $match: { 
+                        customerEmail: { $exists: true, $ne: null },
+                        status: 'Completed' 
+                    } 
+                },
+                { 
+                    $group: {
+                        _id: '$customerEmail',
+                        name: { $first: '$customerName' },
+                        totalSpent: { $sum: '$amount' },
+                        totalOrders: { $sum: 1 },
+                        lastOrder: { $max: '$orderedAt' }
+                    }
+                },
                 { $sort: { totalSpent: -1 } },
                 { $limit: limit }
             ]);
             return { success: true, data: customers };
         } catch (error) {
             console.error('Top customers error:', error);
+            throw error;
+        }
+    }
+
+    // ─── Conversion Rate ──────────────────────────────────────────────────
+    async getConversionRate(dateFrom, dateTo) {
+        try {
+            const { start, end } = this._buildDateRange(dateFrom, dateTo);
+            const allOrdersFilter = this._allOrdersFilter(start, end);
+            const completedFilter = this._completedOrdersFilter(start, end);
+
+            const [totalOrders, completedOrders] = await Promise.all([
+                Order.countDocuments(allOrdersFilter),
+                Order.countDocuments(completedFilter)
+            ]);
+
+            const conversionRate = totalOrders === 0 ? 0 : (completedOrders / totalOrders) * 100;
+
+            return {
+                success: true,
+                data: {
+                    totalOrders,
+                    completedOrders,
+                    conversionRate: Math.round(conversionRate * 100) / 100,
+                    pendingOrders: totalOrders - completedOrders
+                }
+            };
+        } catch (error) {
+            console.error('Error getting conversion rate:', error);
+            throw error;
+        }
+    }
+
+    // ─── Average Order Value Trend ────────────────────────────────────────
+    async getAverageOrderValueTrend(months = 12) {
+        try {
+            const endDate = new Date();
+            const startDate = new Date();
+            startDate.setMonth(startDate.getMonth() - months + 1);
+            startDate.setDate(1);
+            startDate.setHours(0, 0, 0, 0);
+
+            // ✅ Only include COMPLETED orders
+            const monthlyData = await Order.aggregate([
+                { 
+                    $match: { 
+                        orderedAt: { $gte: startDate, $lte: endDate }, 
+                        status: 'Completed' 
+                    } 
+                },
+                { 
+                    $group: {
+                        _id: { year: { $year: '$orderedAt' }, month: { $month: '$orderedAt' } },
+                        totalRevenue: { $sum: '$amount' },
+                        totalOrders: { $sum: 1 }
+                    }
+                },
+                { $sort: { '_id.year': 1, '_id.month': 1 } }
+            ]);
+
+            const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const now = new Date();
+            const result = [];
+            for (let i = months - 1; i >= 0; i--) {
+                const d = new Date();
+                d.setMonth(now.getMonth() - i);
+                const year = d.getFullYear(), month = d.getMonth();
+                const found = monthlyData.find(x => x._id.year === year && x._id.month === month + 1);
+                const avgOrderValue = found && found.totalOrders > 0 ? found.totalRevenue / found.totalOrders : 0;
+                result.push({
+                    month: monthNames[month],
+                    year,
+                    avgOrderValue: Math.round(avgOrderValue * 100) / 100,
+                    totalOrders: found?.totalOrders || 0,
+                    totalRevenue: found?.totalRevenue || 0
+                });
+            }
+            return { success: true, data: result };
+        } catch (error) {
+            console.error('Error getting average order value trend:', error);
             throw error;
         }
     }

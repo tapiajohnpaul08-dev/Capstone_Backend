@@ -119,6 +119,7 @@ const orderSchema = new mongoose.Schema({
   size: { type: String },
   quantity: { type: Number, required: true },
   designDetails: [designDetailsSchema],
+  hasDesign: { type: Boolean, default: false },
   items: [orderItemSchema],
   amount: { type: Number, default: 0 },
   totalAmount: { type: Number, default: 0 },
@@ -184,6 +185,7 @@ const orderSchema = new mongoose.Schema({
   },
 
   fromCustomerToCompanyDeliveryDate:{ type: Date, default: null },
+  dropOffStatus: {type: String, enum: ["Pending", "Received"], default: "Pending"},
   orderedAt: { type: Date, default: Date.now },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },

@@ -1,31 +1,33 @@
 {
-    "id": "ORD-2026-457-3091-PROV",
-    "orderId": "ORD-2026-457-3091-PROV",
-    "orderNumber": "ORD-2026-457-3091-PROV",
+    "id": "ORD-2026-125--COMP",
+    "orderId": "ORD-2026-125--COMP",
+    "orderNumber": "ORD-2026-125--COMP",
     "status": "Pending",
     "statusValue": "pending",
     "paymentStatus": "Unpaid",
-    "isProvided": true,
-    "supplyType": "Own Cups",
-    "deliveryMethod": "Delivery",
-    "totalAmount": 0,
+    "isProvided": false,
+    "supplyType": "Company Cups",
+    "hasDesign": false,
+    "deliveryMethod": "Pick-up",
+    "totalAmount": 1750,
     "quantity": 500,
     "image": null,
-    "date": "8/7/2026",
-    "createdAt": "2026-08-06T17:33:03.100Z",
+    "date": "8/20/2026",
+    "createdAt": "2026-08-19T17:09:22.622Z",
     "items": [
         {
-            "productId": null,
-            "name": "Tumbler",
-            "category": "Customer Provided",
-            "size": "1L",
+            "productId": "PRD-2026-174",
+            "name": "DOUBLE WALLPAPER CUPS",
+            "category": "Paper Cups",
+            "size": "8oz",
             "quantity": 500,
-            "estimatedTotal": 0,
+            "estimatedTotal": 1750,
+            "image": "https://res.cloudinary.com/vwrxijez/image/upload/v1785916841/beverage/products/product-1785916841196-184280702.jpg",
             "design": {
-                "source": "saved",
-                "printSize": "3x3",
-                "printPlacement": "Full-Wrap",
-                "designNotes": "",
+                "source": "no-design",
+                "printSize": "",
+                "printPlacement": "",
+                "designNotes": "No design - plain product, as is.",
                 "files": []
             }
         }
@@ -40,20 +42,30 @@
         "deliveryAddress": "",
         "sameAsCustomer": false
     },
-    "designDetails": [],
-    "expectedDelivery": "8/17/2026",
-    "fromCustomerToCompanyDeliveryDate": "2026-08-13T00:00:00.000Z",
+    "designDetails": [
+        {
+            "designSource": "no-design",
+            "printSize": "",
+            "printPlacement": "",
+            "designNotes": "No design - plain product, as is.",
+            "files": [],
+            "imagePaths": [],
+            "_id": "6a85e342b91c82be36f1be69"
+        }
+    ],
+    "expectedDelivery": "8/27/2026",
+    "fromCustomerToCompanyDeliveryDate": null,
     "preferredDate": null,
     "preferredTime": "",
     "productionSchedule": null,
-    "notes": "Individual Designs | Items: ",
+    "notes": "No Design - Plain product as is | Items: DOUBLE WALLPAPER CUPS",
     "statusHistory": [
         {
             "status": "Pending",
-            "timestamp": "2026-08-06T17:33:03.091Z",
-            "notes": "Order created (customer provided items)",
+            "timestamp": "2026-08-19T17:09:22.617Z",
+            "notes": "Order created",
             "productionSchedule": "",
-            "updatedBy": "6a703e836247a31a29e6a49b"
+            "updatedBy": "6a8577d1fa53b93e2e694e68"
         }
     ]
 }

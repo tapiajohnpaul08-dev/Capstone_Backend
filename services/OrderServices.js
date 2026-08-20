@@ -5,15 +5,13 @@ const InventoryItem = require("../models/InventoryItem.Model");
 const Product = require("../models/Product.Model");
 const Driver = require("../models/Driver.Model");
 const DriverService = require("./DriverServices");
+const Customer = require("../models/Customer.Model");
 const generateId = require("../utils/generateItemId");
 
-// ─── Status constants (single source of truth on the backend) ─────────────
-// Mirrors frontend composables/useOrderStatus.js. "Ready to Pick-up" is
-// intentionally NOT a real backend status - it's a display-only alias the
-// frontend shows for "Out for Delivery" orders whose receivingMode is
-// "Pick-up". Accepting it here as a literal status would let the DB drift
-// out of sync with the enum in Order.Model.js and with anything that
-// queries on "Out for Delivery" (getOrderStatistics, filters, etc).
+// ─── Constants ──────────────────────────────────────────────────────────────
+const DESIGN_AND_PRINTING_FEE = 500;
+
+// ─── Status constants ──────────────────────────────────────────────────────
 const VALID_STATUSES = [
   "Pending",
   "Scheduled",
@@ -23,26 +21,13 @@ const VALID_STATUSES = [
   "Cancelled",
 ];
 
-// Forward-only status flow. Cancelled is reachable from any non-terminal
-// status; every other transition must be exactly "the next step".
 const STATUS_FLOW = ["Pending", "Scheduled", "In Production", "Out for Delivery", "Completed"];
 
-/**
- * Normalize any incoming status string (which may be the frontend's display
- * alias "Ready to Pick-up") down to the status actually stored in the DB.
- */
 function normalizeIncomingStatus(status) {
   if (status === "Ready to Pick-up") return "Out for Delivery";
   return status;
 }
 
-/**
- * Is `nextStatus` a legal transition from `currentStatus`?
- * - Cancelled is always allowed unless the order is already Completed/Cancelled
- *   (that terminal check happens earlier in updateOrderStatus).
- * - Otherwise the new status must be exactly the next step in STATUS_FLOW,
- *   or the same status again (idempotent no-op, e.g. re-saving notes).
- */
 function isValidTransition(currentStatus, nextStatus) {
   if (nextStatus === "Cancelled") return true;
   if (nextStatus === currentStatus) return true;
@@ -52,9 +37,54 @@ function isValidTransition(currentStatus, nextStatus) {
   return nextIdx === currentIdx + 1;
 }
 
+/**
+ * ✅ Helper function to determine if an item has a design
+ * Returns true if designSource is 'upload' or 'saved'
+ * Returns false if designSource is 'no-design' or not provided
+ */
+function hasValidDesign(item) {
+  if (!item) return false;
+  
+  // If designSource is explicitly 'no-design', return false
+  if (item.designSource === 'no-design') {
+    return false;
+  }
+  
+  // If designSource is 'upload' or 'saved', return true
+  if (item.designSource === 'upload' || item.designSource === 'saved') {
+    return true;
+  }
+  
+  // Check for files (uploaded design)
+  if (item.files && item.files.length > 0) {
+    return true;
+  }
+  
+  // Check for design image
+  if (item.designImage && item.designImage.length > 0) {
+    return true;
+  }
+  
+  // Check for selected template (saved design)
+  if (item.selectedTemplateId || item.selectedTemplate) {
+    return true;
+  }
+  
+  // Check for design notes (could indicate custom design)
+  if (item.designNotes && item.designNotes.trim().length > 0) {
+    // But only if it's not the default "no design" note
+    if (item.designNotes !== 'No design - plain product, as is.' && 
+        item.designNotes !== 'No design - plain product as is') {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
 class OrderService {
   // ─────────────────────────────────────────
-  // CREATE ORDER (Supports both own cups and company products)
+  // CREATE ORDER
   // ─────────────────────────────────────────
   async createOrder(payload, user = null, userType = null) {
     const session = await mongoose.startSession();
@@ -66,17 +96,38 @@ class OrderService {
       let customerEmail = payload.customerEmail;
       let customerName = payload.customerName;
       let customerPhone = payload.customerPhone;
+      let customerId = null;
 
+      // ─── Get or find customer ──────────────────────────────────────────
       if (user && userType === "customer") {
         orderedById = user._id.toString();
         customerEmail = customerEmail || user.email;
         customerName = customerName || user.name;
         customerPhone = customerPhone || user.phone;
-      } else if (!customerEmail) {
+        
+        const customer = await Customer.findOne({ _id: user._id });
+        if (customer) {
+          customerId = customer._id;
+          console.log(`✅ Found customer: ${customer.email} (ID: ${customerId})`);
+        } else {
+          console.warn(`⚠️ Customer not found for user ID: ${user._id}`);
+        }
+      } else if (customerEmail) {
+        const customer = await Customer.findOne({ email: customerEmail });
+        if (customer) {
+          customerId = customer._id;
+          orderedById = customer._id.toString();
+          console.log(`✅ Found customer by email: ${customerEmail} (ID: ${customerId})`);
+        } else {
+          console.warn(`⚠️ Customer not found for email: ${customerEmail}`);
+        }
+      }
+
+      if (!customerEmail) {
         return { success: false, message: "Customer email is required" };
       }
 
-      // Calculate expected delivery - use preferred date if provided
+      // ─── Calculate expected delivery ──────────────────────────────────
       let expectedDelivery;
       if (payload.preferredDate) {
         expectedDelivery = new Date(payload.preferredDate);
@@ -88,12 +139,32 @@ class OrderService {
         expectedDelivery = this.calculateExpectedDelivery(payload.receivingMode);
       }
 
-      // ─── Own-cups orders: no inventory to touch, no transaction needed ──
+      let newOrder = null;
+
+      // ─── Own-cups orders ──────────────────────────────────────────────
       if (payload.isProvided === true) {
         const firstItem = payload.items && payload.items.length > 0 ? payload.items[0] : {};
         const providedId = await generateId("ORD");
 
-        const newOrder = new Order({
+        // OWN CUPS: ₱500 flat fee (covers both printing service AND design if applicable)
+        const totalAmount = DESIGN_AND_PRINTING_FEE;
+        
+        // ✅ Check if there's a valid design using the helper function
+        const hasDesign = hasValidDesign(firstItem) || hasValidDesign(payload);
+
+        // Build design details from first item or payload
+        const designDetails = {
+          designSource: firstItem.designSource || payload.designSource || "upload",
+          designImage: firstItem.designImage || payload.designImage || "",
+          printSize: firstItem.printSize || payload.printSize || "",
+          printPlacement: firstItem.printPlacement || payload.printPlacement || "",
+          designNotes: firstItem.designNotes || payload.designNotes || "",
+          files: firstItem.files || payload.files || [],
+        };
+
+        console.log(`✅ Own cups order - hasDesign: ${hasDesign}`);
+
+        newOrder = new Order({
           orderId: `${providedId}-PROV`,
           customerName,
           customerEmail,
@@ -118,8 +189,10 @@ class OrderService {
               estimatedTotal: 0,
             },
           ],
+          designDetails: [designDetails],
+          hasDesign: hasDesign, // ✅ Set hasDesign flag based on designSource
           quantity: firstItem.quantity || payload.quantity,
-          amount: payload.amount,
+          amount: totalAmount,
           status: "Pending",
           paymentStatus: "Unpaid",
           receivingMode: payload.receivingMode,
@@ -148,13 +221,18 @@ class OrderService {
         });
 
         await newOrder.save();
+
+        if (customerId) {
+          await Customer.findByIdAndUpdate(customerId, {
+            $push: { orders: newOrder._id }
+          });
+          console.log(`✅ Order ${newOrder.orderId} added to customer's orders array`);
+        }
+
         return { success: true, message: "Order created successfully", data: newOrder };
       }
 
-      // ─── Company-product orders: decrement stock + create order atomically ──
-      // Wrapped in a transaction so a failure partway through (e.g. order
-      // validation fails after stock has already been decremented) can't
-      // leave inventory permanently out of sync with reality.
+      // ─── Company-product orders ──────────────────────────────────────
       const itemsToProcess = payload.items || [
         {
           productId: payload.productId,
@@ -172,13 +250,13 @@ class OrderService {
         },
       ];
 
-      let newOrder;
       let txnResult;
-
+      
       try {
         await session.withTransaction(async () => {
           const processedItems = [];
-          let totalAmount = 0;
+          let productTotal = 0;
+          let hasDesign = false;
 
           for (const item of itemsToProcess) {
             const product = await Product.findOne({ id: item.productId }).session(session);
@@ -209,7 +287,12 @@ class OrderService {
             else if (qty >= 500 && sizeObj.bulkPrices?.[500]) unitPrice = sizeObj.bulkPrices[500] / 500;
 
             const itemTotal = unitPrice * qty;
-            totalAmount += itemTotal;
+            productTotal += itemTotal;
+
+            // ✅ Check if this item has a valid design using the helper function
+            if (hasValidDesign(item)) {
+              hasDesign = true;
+            }
 
             processedItems.push({
               productId: item.productId,
@@ -233,6 +316,28 @@ class OrderService {
             await product.save({ session });
           }
 
+          // ✅ COMPANY PRODUCT: Add design fee (₱500) ONLY if there's a design
+          let totalAmount = productTotal;
+          if (hasDesign) {
+            totalAmount += DESIGN_AND_PRINTING_FEE;
+            console.log("✅ Design fee added to company product order");
+          } else {
+            console.log("❌ No design fee added - no design provided");
+          }
+
+          // ✅ Build design details from the first item
+          const firstItem = processedItems[0] || {};
+          const designDetails = {
+            designSource: firstItem.designSource || "upload",
+            designImage: firstItem.designImage || "",
+            printSize: firstItem.printSize || "",
+            printPlacement: firstItem.printPlacement || "",
+            designNotes: firstItem.designNotes || "",
+            files: firstItem.files || [],
+          };
+
+          console.log(`✅ Company order - hasDesign: ${hasDesign}`);
+
           const OrderId = await generateId("ORD");
 
           newOrder = new Order({
@@ -243,6 +348,8 @@ class OrderService {
             address: payload.address,
             postalCode: payload.postalCode || "",
             items: processedItems,
+            hasDesign: hasDesign, // ✅ Set hasDesign flag based on designSource
+            designDetails: [designDetails],
             quantity: processedItems.reduce((sum, i) => sum + i.quantity, 0),
             amount: totalAmount,
             status: "Pending",
@@ -254,35 +361,38 @@ class OrderService {
             orderedBy: orderedById,
             notes: payload.notes || `Order with ${processedItems.length} item(s)`,
             statusHistory: [
-              { status: "Pending", timestamp: new Date(), notes: "Order created", updatedBy: null },
+              { status: "Pending", timestamp: new Date(), notes: "Order created", updatedBy: orderedById },
             ],
             customer: {
               name: customerName,
               email: customerEmail,
               phone: customerPhone,
-              company: payload.customer?.company,
+              company: payload.customer?.company || "",
             },
             paymentMethod: payload.paymentMethod || "cod",
             paymentDetails: payload.paymentDetails || null,
           });
 
           await newOrder.save({ session });
+
+          if (customerId) {
+            await Customer.findByIdAndUpdate(customerId, {
+              $push: { orders: newOrder._id }
+            }).session(session);
+            console.log(`✅ Order ${newOrder.orderId} added to customer's orders array (transaction)`);
+          }
         });
       } catch (txnErr) {
         if (txnErr.handled) {
           txnResult = { success: false, message: txnErr.message };
         } else {
-          // Transactions require a MongoDB replica set. If the deployment is
-          // a standalone instance, withTransaction will throw a
-          // non-"handled" error - fall back to the old non-transactional
-          // behavior rather than hard-failing every order creation.
           console.warn(
             "⚠️ Transaction failed/unsupported, falling back to non-transactional order creation:",
             txnErr.message,
           );
           return await this._createCompanyOrderWithoutTransaction(
             itemsToProcess,
-            { customerName, customerEmail, customerPhone, orderedById, payload, expectedDelivery },
+            { customerName, customerEmail, customerPhone, orderedById, payload, expectedDelivery, customerId },
           );
         }
       } finally {
@@ -295,17 +405,19 @@ class OrderService {
       return { success: true, message: "Order created successfully", data: newOrder };
     } catch (error) {
       console.error("❌ Error creating order:", error);
-      session.endSession();
+      if (session) session.endSession();
       throw error;
     }
   }
 
-  // Fallback path for MongoDB deployments without transaction support
-  // (standalone servers). Behaves like the original untransacted logic.
+  // ─────────────────────────────────────────
+  // CREATE COMPANY ORDER WITHOUT TRANSACTION (Fallback)
+  // ─────────────────────────────────────────
   async _createCompanyOrderWithoutTransaction(itemsToProcess, ctx) {
-    const { customerName, customerEmail, customerPhone, orderedById, payload, expectedDelivery } = ctx;
+    const { customerName, customerEmail, customerPhone, orderedById, payload, expectedDelivery, customerId } = ctx;
     const processedItems = [];
-    let totalAmount = 0;
+    let productTotal = 0;
+    let hasDesign = false;
 
     for (const item of itemsToProcess) {
       const product = await Product.findOne({ id: item.productId });
@@ -329,7 +441,12 @@ class OrderService {
       else if (qty >= 500 && sizeObj.bulkPrices?.[500]) unitPrice = sizeObj.bulkPrices[500] / 500;
 
       const itemTotal = unitPrice * qty;
-      totalAmount += itemTotal;
+      productTotal += itemTotal;
+
+      // ✅ Check if this item has a valid design using the helper function
+      if (hasValidDesign(item)) {
+        hasDesign = true;
+      }
 
       processedItems.push({
         productId: item.productId,
@@ -353,6 +470,22 @@ class OrderService {
       await product.save();
     }
 
+    // ✅ COMPANY PRODUCT: Add design fee (₱500) ONLY if there's a design
+    let totalAmount = productTotal;
+    if (hasDesign) {
+      totalAmount += DESIGN_AND_PRINTING_FEE;
+    }
+
+    const firstItem = processedItems[0] || {};
+    const designDetails = {
+      designSource: firstItem.designSource || "upload",
+      designImage: firstItem.designImage || "",
+      printSize: firstItem.printSize || "",
+      printPlacement: firstItem.printPlacement || "",
+      designNotes: firstItem.designNotes || "",
+      files: firstItem.files || [],
+    };
+
     const OrderId = await generateId("ORD");
     const newOrder = new Order({
       orderId: `${OrderId}-COMP`,
@@ -362,6 +495,8 @@ class OrderService {
       address: payload.address,
       postalCode: payload.postalCode || "",
       items: processedItems,
+      hasDesign: hasDesign, // ✅ Set hasDesign flag based on designSource
+      designDetails: [designDetails],
       quantity: processedItems.reduce((sum, i) => sum + i.quantity, 0),
       amount: totalAmount,
       status: "Pending",
@@ -377,13 +512,21 @@ class OrderService {
         name: customerName,
         email: customerEmail,
         phone: customerPhone,
-        company: payload.customer?.company,
+        company: payload.customer?.company || "",
       },
       paymentMethod: payload.paymentMethod || "cod",
       paymentDetails: payload.paymentDetails || null,
     });
 
     await newOrder.save();
+
+    if (customerId) {
+      await Customer.findByIdAndUpdate(customerId, {
+        $push: { orders: newOrder._id }
+      });
+      console.log(`✅ Order ${newOrder.orderId} added to customer's orders array (fallback)`);
+    }
+
     console.log("✅ Order created (no transaction):", newOrder.orderId);
     return { success: true, message: "Order created successfully", data: newOrder };
   }
@@ -419,12 +562,10 @@ class OrderService {
   }
 
   // ─────────────────────────────────────────
-  // UPDATE ORDER STATUS (with driver assignment tracking)
+  // UPDATE ORDER STATUS
   // ─────────────────────────────────────────
   async updateOrderStatus(orderId, newStatus, notes, productionSchedule = null, driverId = null, user = null) {
     try {
-      // Accept the frontend's display alias ("Ready to Pick-up") and map it
-      // down to the real DB status before doing anything else.
       newStatus = normalizeIncomingStatus(newStatus);
 
       console.log(`🔵 Updating order status for ${orderId} to ${newStatus}`);
@@ -445,10 +586,6 @@ class OrderService {
         };
       }
 
-      // ─── Enforce a sane forward-only status flow ─────────────────────────
-      // Prevents e.g. jumping straight from "Pending" to "Completed", or
-      // moving backwards from "In Production" to "Scheduled", from either a
-      // buggy client or a stale UI.
       if (!isValidTransition(order.status, newStatus)) {
         return {
           success: false,
@@ -460,7 +597,7 @@ class OrderService {
 
       const oldStatus = order.status;
 
-      // ─── SCHEDULED: production schedule is required ──────────────────────
+      // ─── SCHEDULED ──────────────────────────────────────────────────────
       if (newStatus === "Scheduled") {
         const scheduleValue = productionSchedule || order.productionSchedule;
         if (!scheduleValue) {
@@ -478,7 +615,7 @@ class OrderService {
         order.productionSchedule = scheduleDate;
       }
 
-      // ─── OUT FOR DELIVERY: assign driver (Delivery orders only) ─────────
+      // ─── OUT FOR DELIVERY ──────────────────────────────────────────────
       if (newStatus === "Out for Delivery" && order.receivingMode === "Delivery") {
         if (!driverId) {
           return { success: false, message: "A driver must be assigned before marking as Out for Delivery" };
@@ -504,7 +641,7 @@ class OrderService {
         console.log(`✅ Driver ${driverId} assigned orders count incremented to ${incrementResult.data.assignedOrdersCount}`);
       }
 
-      // ─── COMPLETED OR CANCELLED: release driver ───────────────────────────
+      // ─── COMPLETED OR CANCELLED ────────────────────────────────────────
       if ((newStatus === "Completed" || newStatus === "Cancelled") && order.driverDetails?.driverId) {
         const decrementResult = await DriverService.decrementAssignedOrders(order.driverDetails.driverId);
         if (decrementResult.success) {
@@ -514,7 +651,7 @@ class OrderService {
         }
       }
 
-      // ─── CANCELLED: restore inventory ─────────────────────────────────────
+      // ─── CANCELLED: restore inventory ─────────────────────────────────
       if (newStatus === "Cancelled" && order.status !== "Cancelled" && !order.isProvided) {
         for (const item of order.items) {
           if (item.productId) {
@@ -531,52 +668,54 @@ class OrderService {
         }
       }
 
-      // ─── UPDATE ORDER ─────────────────────────────────────────────────────
+      if (newStatus === "Completed") {
+        await this.updatePaymentStatus(orderId, "Paid", order.totalAmount, user);
+      }
+
+      // ─── UPDATE ORDER ─────────────────────────────────────────────────
       order.status = newStatus;
 
       function generateNotes(status) {
-  // Get receiving mode from order
-  const receivingMode = order?.receivingMode || order?.deliveryMethod || 'Delivery'
-  const isPickup = receivingMode === 'Pick-up'
-  
-  switch (status) {
-    case "Scheduled":
-      const scheduleDate = order?.productionSchedule 
-        ? new Date(order.productionSchedule).toLocaleDateString('en-PH', { 
-            month: 'short', 
-            day: 'numeric', 
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-          })
-        : 'Date not set'
-      return `Order scheduled for production on ${scheduleDate}`
-      
-    case "In Production":
-      return "Order is now in production"
-      
-    case "Out for Delivery":
-      if (isPickup) {
-        return `Order is ready for pickup at the store`
+        const receivingMode = order?.receivingMode || order?.deliveryMethod || 'Delivery';
+        const isPickup = receivingMode === 'Pick-up';
+        
+        switch (status) {
+          case "Scheduled":
+            const scheduleDate = order?.productionSchedule 
+              ? new Date(order.productionSchedule).toLocaleDateString('en-PH', { 
+                  month: 'short', 
+                  day: 'numeric', 
+                  year: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })
+              : 'Date not set';
+            return `Order scheduled for production on ${scheduleDate}`;
+            
+          case "In Production":
+            return "Order is now in production";
+            
+          case "Out for Delivery":
+            if (isPickup) {
+              return `Order is ready for pickup at the store`;
+            }
+            const driverName = order?.driverDetails?.driverName || 'Not assigned';
+            const driverPhone = order?.driverDetails?.driverPhone || 'No phone';
+            return `Order is out for delivery (Driver: ${driverName}, Phone: ${driverPhone})`;
+            
+          case "Completed":
+            if (isPickup) {
+              return "Order has been picked up by customer";
+            }
+            return "Order has been delivered and received";
+            
+          case "Cancelled":
+            return "Order has been cancelled";
+            
+          default:
+            return "";
+        }
       }
-      // For Delivery
-      const driverName = order?.driverDetails?.driverName || 'Not assigned'
-      const driverPhone = order?.driverDetails?.driverPhone || 'No phone'
-      return `Order is out for delivery (Driver: ${driverName}, Phone: ${driverPhone})`
-      
-    case "Completed":
-      if (isPickup) {
-        return "Order has been picked up by customer"
-      }
-      return "Order has been delivered and received"
-      
-    case "Cancelled":
-      return "Order has been cancelled"
-      
-    default:
-      return ""
-  }
-}
 
       const historyEntry = {
         status: newStatus,
@@ -693,6 +832,16 @@ class OrderService {
       if (order.driverDetails?.driverId) {
         await DriverService.decrementAssignedOrders(order.driverDetails.driverId);
         console.log(`✅ Driver ${order.driverDetails.driverId} released on order deletion`);
+      }
+
+      if (order.orderedBy) {
+        const customer = await Customer.findOne({ _id: order.orderedBy });
+        if (customer) {
+          await Customer.findByIdAndUpdate(customer._id, {
+            $pull: { orders: order._id }
+          });
+          console.log(`✅ Order ${order.orderId} removed from customer's orders array`);
+        }
       }
 
       await Order.findOneAndDelete({ orderId });
@@ -935,9 +1084,6 @@ class OrderService {
         return { success: false, message: "Order not found" };
       }
 
-      // Both "Out for Delivery" (delivery orders) and its pickup alias
-      // "Ready to Pick-up" (pickup orders) are stored as "Out for Delivery"
-      // in the DB - this check already covers both cases correctly.
       if (order.status !== "Out for Delivery") {
         const friendlyStatus =
           order.status === "Out for Delivery" && order.receivingMode === "Pick-up"
@@ -954,7 +1100,7 @@ class OrderService {
 
       if (isReceived) {
         order.status = "Completed";
-        order.paymentStatus = "Paid"; // Mark as paid when received
+        order.paymentStatus = "Paid";
         order.statusHistory.push({
           status: "Completed",
           timestamp: new Date(),
@@ -965,8 +1111,6 @@ class OrderService {
           updatedBy: user ? user._id?.toString() || user.email : null,
         });
 
-        // Release the driver now that the delivery is complete, for
-        // consistency with the same release logic in updateOrderStatus.
         if (order.driverDetails?.driverId) {
           const decrementResult = await DriverService.decrementAssignedOrders(order.driverDetails.driverId);
           if (decrementResult.success) {

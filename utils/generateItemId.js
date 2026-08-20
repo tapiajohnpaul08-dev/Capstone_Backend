@@ -12,7 +12,7 @@ const generateId = async (prefix = 'PRD', padding = 3) => {
         case 'SUP': // Supply
             return `${prefix}-${year}-${random}`;
         case 'ORD': // Order
-            return `${prefix}-${year}-${random}-${timestamp}`;
+            return `${prefix}-${year}-${random}-`;
         case 'PRD': // Products
         default:
             return `${prefix}-${year}-${random}`;

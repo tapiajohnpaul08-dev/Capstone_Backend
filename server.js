@@ -142,6 +142,7 @@ app.use('/api/v1/auth', require('./routes/OAuthRoutes'));
 app.use('/api/v1/designs', require('./routes/DesignRoutes'));
 app.use('/api/v1/chat', require('./routes/ChatRoutes'));
 app.use('/api/v1/drivers', require('./routes/DriverRoutes'));
+app.use('/api/v1/feedback', require('./routes/FeedbackRoutes'));
 
 // ─────────────────────────────────────────
 // 404 HANDLER

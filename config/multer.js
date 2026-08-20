@@ -13,7 +13,7 @@ const productCloudStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
     folder: 'beverage/products',
-    allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+    allowed_formats: ['jpg', 'jpeg', 'png', 'AI', 'PSD', 'SVG', 'PDF'],
     transformation: [
       { width: 800, height: 800, crop: 'limit', quality: 'auto' },
       { fetch_format: 'auto' }
@@ -30,7 +30,7 @@ const templateCloudStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
     folder: 'beverage/templates',
-    allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+    allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'AI', 'PSD', 'SVG', 'PDF'],
     transformation: [
       { width: 600, height: 600, crop: 'limit', quality: 'auto' },
       { fetch_format: 'auto' }
@@ -47,7 +47,7 @@ const designCloudStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
     folder: 'beverage/designs',
-    allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'pdf'],
+    allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'AI', 'PSD', 'SVG', 'PDF'],
     transformation: [
       { width: 1200, height: 1200, crop: 'limit', quality: 'auto' },
       { fetch_format: 'auto' }
@@ -64,7 +64,7 @@ const chatCloudStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
     folder: 'beverage/chat',
-    allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf', 'doc', 'docx', 'txt', 'xlsx'],
+    allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'AI', 'PSD', 'SVG', 'PDF', 'doc', 'docx', 'txt', 'xlsx'],
     resource_type: 'auto',
     transformation: [
       { quality: 'auto' },
@@ -83,18 +83,18 @@ const chatCloudStorage = new CloudinaryStorage({
 // ──────────────────────────────────────────────
 
 const imageFileFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|gif|webp|svg/;
+  const allowedTypes = /jpeg|jpg|png|gif|webp|AI|PSD|SVG|PDF/;
   const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
   const mimetype = allowedTypes.test(file.mimetype);
   
   if (mimetype && extname) {
     return cb(null, true);
   }
-  cb(new Error('Only image files are allowed (.jpg, .jpeg, .png, .gif, .webp, .svg)'));
+  cb(new Error('Only image files are allowed (.jpg, .jpeg, .png, .gif, .webp, .AI, .PSD, .SVG, .PDF)'));
 };
 
 const chatFileFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|gif|webp|pdf|doc|docx|txt|xlsx|svg/;
+  const allowedTypes = /jpeg|jpg|png|gif|webp|AI|PSD|SVG|PDF|doc|docx|txt|xlsx/;
   const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
   const mimetype = allowedTypes.test(file.mimetype);
   
@@ -109,26 +109,26 @@ const chatFileFilter = (req, file, cb) => {
 // ──────────────────────────────────────────────
 
 const productUpload = multer({
-  storage: productCloudStorage, // ← Always Cloudinary
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  storage: productCloudStorage, // ← Cloudinary
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
   fileFilter: imageFileFilter
 });
 
 const templateUpload = multer({
-  storage: templateCloudStorage, // ← Always Cloudinary
-  limits: { fileSize: 10 * 1024 * 1024 },
+  storage: templateCloudStorage,
+  limits: { fileSize: 20 * 1024 * 1024 },
   fileFilter: imageFileFilter
 });
 
 const designUpload = multer({
-  storage: designCloudStorage, // ← Always Cloudinary
-  limits: { fileSize: 15 * 1024 * 1024 },
+  storage: designCloudStorage,
+  limits: { fileSize: 20 * 1024 * 1024 },
   fileFilter: imageFileFilter
 });
 
 const chatUpload = multer({
-  storage: chatCloudStorage, // ← Always Cloudinary
-  limits: { fileSize: 10 * 1024 * 1024 },
+  storage: chatCloudStorage,
+  limits: { fileSize: 20 * 1024 * 1024 }, 
   fileFilter: chatFileFilter
 });
 
