@@ -29,7 +29,6 @@ class SupplyService {
                 image: payload.image || '',
                 supplier: payload.supplier,
                 supplierContact: payload.supplierContact || '',
-                leadTime: payload.leadTime || 7,
                 unit: payload.unit || 'piece',
                 minOrderQuantity: payload.minOrderQuantity || 1,
                 unitCost: payload.unitCost || 0,

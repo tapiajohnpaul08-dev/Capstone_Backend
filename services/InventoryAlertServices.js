@@ -31,10 +31,7 @@ class InventoryAlertService {
             }
             
             const needsAlert = forceSend || this.needsAlert(inventoryItem.stock, inventoryItem.threshold);
-            
-            if (!needsAlert && !forceSend) {
-                return { success: false, message: 'Stock level is adequate, no alert needed' };
-            }
+        
             
             // Send email notification
             const result = await mailService.sendStockAlert({
@@ -74,9 +71,6 @@ class InventoryAlertService {
             const threshold = 100;
             const needsAlert = this.needsAlert(size.stock || 0, threshold);
             
-            if (!needsAlert) {
-                return { success: false, message: 'Stock level is adequate' };
-            }
             
             const result = await mailService.sendStockAlert({
                 itemName: product.name,
@@ -97,81 +91,123 @@ class InventoryAlertService {
         }
     }
     
-    /**
-     * Check all inventory and send alerts for low/out of stock items
-     */
     async scanAndAlertAll() {
-        const alertsSent = [];
-        const errors = [];
-        
         try {
-            // Get all inventory items (supplies)
+            const allItems = []; // will hold { name, type, currentStock, threshold, unit, sizeName, category, itemId, status }
+
+            // ─── 1. Inventory items (supplies + product inventory) ───
             const inventoryItems = await InventoryItem.find({ isActive: true });
-            
-            console.log(`Found ${inventoryItems.length} inventory items to check`);
-            
+
             for (const item of inventoryItems) {
-                // Fetch the actual item based on type using ObjectId
                 let itemRef = null;
-                
+                let itemName = '';
+                let category = '';
+
                 if (item.itemType === 'supply') {
                     itemRef = await Supply.findById(item.itemRef);
-                    console.log(`Checking supply: ${itemRef?.name}, Stock: ${item.stock}, Threshold: ${item.threshold}`);
+                    if (itemRef) {
+                        itemName = itemRef.name;
+                        category = itemRef.category || '';
+                    }
                 } else if (item.itemType === 'product') {
                     itemRef = await Product.findById(item.itemRef);
-                    console.log(`Checking product: ${itemRef?.name}, Stock: ${item.stock}, Threshold: ${item.threshold}`);
-                }
-                
-                if (!itemRef) {
-                    console.log(`Skipping - Item reference not found for ${item.itemId}`);
-                    continue;
-                }
-                
-                if (this.needsAlert(item.stock, item.threshold)) {
-                    console.log(`Sending alert for ${item.itemType}: ${itemRef.name}`);
-                    
-                    const result = await mailService.sendStockAlert({
-                        itemName: itemRef.name,
-                        itemType: item.itemType,
-                        currentStock: item.stock,
-                        threshold: item.threshold,
-                        unit: item.unit,
-                        category: itemRef.category,
-                        itemId: item.itemId
-                    });
-                    
-                    if (result.success) {
-                        alertsSent.push({
-                            itemId: item.itemId,
-                            name: itemRef.name,
-                            stock: item.stock,
-                            type: item.itemType
-                        });
-                    } else {
-                        errors.push({ itemId: item.itemId, error: result.message });
+                    if (itemRef) {
+                        itemName = itemRef.name;
+                        category = itemRef.category || '';
                     }
-                    
-                    // Small delay to avoid rate limiting
-                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+
+                if (itemName) {
+                    const stock = item.stock || 0;
+                    const threshold = item.threshold || 0;
+                    let status = 'In Stock';
+                    if (stock === 0) status = 'Out of Stock';
+                    else if (stock <= threshold) status = 'Low Stock';
+
+                    allItems.push({
+                        name: itemName,
+                        type: item.itemType === 'product' ? 'Product' : 'Supply',
+                        currentStock: stock,
+                        threshold: threshold,
+                        unit: item.unit || 'pcs',
+                        sizeName: null,
+                        category: category,
+                        itemId: item.itemId,
+                        status: status
+                    });
                 }
             }
-            
-            // Also check product sizes (products have their own stock in sizes array)
-            await this.scanProductSizes(alertsSent, errors);
-            
-            console.log(`Scan complete: ${alertsSent.length} alerts sent, ${errors.length} errors`);
-            
-            return {
-                success: true,
-                alertsSent: alertsSent.length,
-                details: { alertsSent, errors }
-            };
-            
+
+            // ─── 2. Product sizes ───
+            const products = await Product.find();
+            const SIZE_THRESHOLD = 800;
+
+            for (const product of products) {
+                if (product.sizes && product.sizes.length > 0) {
+                    for (const size of product.sizes) {
+                        const stock = size.stock || 0;
+                        let status = 'In Stock';
+                        if (stock === 0) status = 'Out of Stock';
+                        else if (stock <= SIZE_THRESHOLD) status = 'Low Stock';
+
+                        allItems.push({
+                            name: product.name,
+                            type: 'Product Size',
+                            currentStock: stock,
+                            threshold: SIZE_THRESHOLD,
+                            unit: 'pcs',
+                            sizeName: size.name,
+                            category: product.category || '',
+                            itemId: product.id,
+                            status: status
+                        });
+                    }
+                }
+            }
+
+            if (allItems.length === 0) {
+                return {
+                    success: true,
+                    message: 'No inventory items found.',
+                    alertsSent: 0,
+                    details: { alertsSent: [], errors: [] }
+                };
+            }
+
+            // ─── 3. Send ONE consolidated email with ALL items ───
+            const result = await mailService.sendFullInventoryReport(allItems);
+
+            if (result.success) {
+                return {
+                    success: true,
+                    message: `Inventory report sent – ${allItems.length} items listed.`,
+                    alertsSent: allItems.length,
+                    details: {
+                        alertsSent: allItems.map(i => ({
+                            itemId: i.itemId,
+                            name: i.name + (i.sizeName ? ` (${i.sizeName})` : ''),
+                            stock: i.currentStock,
+                            type: i.type,
+                            status: i.status
+                        })),
+                        errors: []
+                    }
+                };
+            } else {
+                return {
+                    success: false,
+                    message: result.message || 'Failed to send email',
+                    alertsSent: 0,
+                    details: { alertsSent: [], errors: [] }
+                };
+            }
+
         } catch (error) {
             console.error('Error scanning inventory:', error);
             return { success: false, message: error.message };
         }
     }
+
     
     /**
      * Scan all products and check their sizes

@@ -86,7 +86,6 @@ const driverSchema = new mongoose.Schema({
     }
 });
 
-
 // Virtual for full name
 driverSchema.virtual('fullName').get(function() {
     const middle = this.middleName ? ` ${this.middleName} ` : ' ';

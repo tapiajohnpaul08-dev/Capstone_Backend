@@ -14,7 +14,6 @@ const supplySchema = new mongoose.Schema({
     
     supplier: { type: String, required: true },
     supplierContact: { type: String, default: '' },
-    leadTime: { type: Number, default: 7 },
     
     unit: { type: String, default: 'piece' },
     minOrderQuantity: { type: Number, default: 1 },

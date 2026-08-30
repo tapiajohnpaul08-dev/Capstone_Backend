@@ -1,6 +1,7 @@
 const adminService = require('../services/AdminServices');
 const customerService = require('../services/CustomerServices');
-
+const driverService = require('../services/DriverServices');
+const Driver = require('../models/Driver.Model');
 // ─────────────────────────────────────────
 // ADMIN MIDDLEWARE
 // ─────────────────────────────────────────
@@ -66,6 +67,39 @@ const verifyCustomerToken = async (req, res, next) => {
 
     } catch (error) {
         console.error('Customer auth error:', error);
+        return res.status(401).json({
+            success: false,
+            message: 'Authentication failed'
+        });
+    }
+};
+
+const verifyDriverToken = async (req, res, next) => {
+    try {
+        // Only check Authorization header, no cookies
+        const token = req.headers.authorization?.split(' ')[1];
+
+        if (!token) {
+            return res.status(401).json({
+                success: false,
+                message: 'Access denied. No token provided.'
+            });
+        }
+
+        const response = await driverService.verifyToken(token);
+        console.log('Driver verify response:', response.success);
+        if (!response.success) {
+            return res.status(401).json({
+                success: false,
+                message: response.message,
+            });
+        }
+
+        req.driver = response.data;
+        next();
+
+    } catch (error) {
+        console.error('Driver auth error:', error);
         return res.status(401).json({
             success: false,
             message: 'Authentication failed'
@@ -142,6 +176,7 @@ const checkRole = (...roles) => {
 module.exports = {
     verifyAdminToken,
     verifyCustomerToken,
+    verifyDriverToken,
     verifyAnyToken,
     checkRole
 };
