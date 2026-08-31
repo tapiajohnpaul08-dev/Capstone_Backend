@@ -2,12 +2,12 @@ const adminService = require('../services/AdminServices');
 const customerService = require('../services/CustomerServices');
 const driverService = require('../services/DriverServices');
 const Driver = require('../models/Driver.Model');
+
 // ─────────────────────────────────────────
 // ADMIN MIDDLEWARE
 // ─────────────────────────────────────────
 const verifyAdminToken = async (req, res, next) => {
     try {
-        // Only check Authorization header, no cookies
         const token = req.headers.authorization?.split(' ')[1];
 
         if (!token) {
@@ -58,7 +58,6 @@ const verifyCustomerToken = async (req, res, next) => {
             return res.status(401).json({
                 success: false,
                 message: response.message
-                
             });
         }
 
@@ -74,9 +73,11 @@ const verifyCustomerToken = async (req, res, next) => {
     }
 };
 
+// ─────────────────────────────────────────
+// DRIVER MIDDLEWARE - ✅ FIXED
+// ─────────────────────────────────────────
 const verifyDriverToken = async (req, res, next) => {
     try {
-        // Only check Authorization header, no cookies
         const token = req.headers.authorization?.split(' ')[1];
 
         if (!token) {
@@ -88,6 +89,7 @@ const verifyDriverToken = async (req, res, next) => {
 
         const response = await driverService.verifyToken(token);
         console.log('Driver verify response:', response.success);
+        
         if (!response.success) {
             return res.status(401).json({
                 success: false,
@@ -95,7 +97,27 @@ const verifyDriverToken = async (req, res, next) => {
             });
         }
 
-        req.driver = response.data;
+        // ✅ FIX: Set BOTH req.driver AND req.user for compatibility
+        // The controller expects req.user
+        const driverData = response.data;
+        
+        req.driver = driverData;
+        req.user = {
+            id: driverData._id || driverData.id,
+            driverId: driverData.driverId,
+            email: driverData.email,
+            username: driverData.username,
+            role: 'driver',
+            firstName: driverData.firstName,
+            lastName: driverData.lastName,
+            phoneNumber: driverData.phoneNumber,
+            plateNumber: driverData.plateNumber,
+            vehicleDescription: driverData.vehicleDescription,
+            available: driverData.available,
+            assignedOrdersCount: driverData.assignedOrdersCount || 0
+        };
+
+        console.log(`✅ Driver authenticated: ${req.user.driverId} (${req.user.email})`);
         next();
 
     } catch (error) {
@@ -106,12 +128,12 @@ const verifyDriverToken = async (req, res, next) => {
         });
     }
 };
+
 // ─────────────────────────────────────────
 // EITHER ADMIN OR CUSTOMER (shared routes)
 // ─────────────────────────────────────────
 const verifyAnyToken = async (req, res, next) => {
     try {
-        // Only check Authorization header
         const token = req.headers.authorization?.split(' ')[1];
 
         if (!token) {

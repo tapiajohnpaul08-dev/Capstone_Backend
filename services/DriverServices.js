@@ -2,12 +2,92 @@
 const Driver = require('../models/Driver.Model');
 const bcrypt = require("bcrypt");
 const generateId = require('../utils/generateId');
-
 const jwt = require("jsonwebtoken");
 
-const JWT_SECRET = process.env.JWT_SECRET;
-const JWT_EXPIRES_IN = "24h";
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+const JWT_EXPIRES_IN = "7d";
+
 class DriverService {
+    
+    // ============ AUTHENTICATION ============
+    
+    // Login driver
+    async login(email, password) {
+        try {
+            const driver = await Driver.findOne({ email: email.toLowerCase() });
+
+            if (!driver) {
+                return {
+                    success: false,
+                    message: "Invalid email or password",
+                };
+            }
+
+            const isPasswordValid = await bcrypt.compare(password, driver.password);
+
+            if (!isPasswordValid) {
+                return {
+                    success: false,
+                    message: "Invalid email or password",
+                };
+            }
+
+            // Update last login
+            driver.lastLogin = new Date();
+            await driver.save();
+
+            // Generate token
+            const token = jwt.sign(
+                {
+                    id: driver._id.toString(),
+                    driverId: driver.driverId,
+                    email: driver.email,
+                    username: driver.username,
+                    role: 'driver',
+                },
+                JWT_SECRET,
+                { expiresIn: JWT_EXPIRES_IN }
+            );
+
+            const driverData = driver.toObject();
+            delete driverData.password;
+
+            return {
+                success: true,
+                message: "Login successful",
+                token: token,
+                data: driverData,
+            };
+        } catch (error) {
+            console.error("Error logging in:", error);
+            throw error;
+        }
+    }
+
+    // Verify token
+    async verifyToken(token) {
+        try {
+            const decoded = jwt.verify(token, JWT_SECRET);
+            const driver = await Driver.findById(decoded.id).select("-password");
+
+            if (!driver) {
+                return { success: false, message: "Driver not found" };
+            }
+
+            return { success: true, data: driver };
+        } catch (error) {
+            if (error.name === "TokenExpiredError") {
+                return { success: false, message: "Token has expired" };
+            }
+            if (error.name === "JsonWebTokenError") {
+                return { success: false, message: "Invalid token" };
+            }
+            console.error("Error verifying token:", error);
+            throw error;
+        }
+    }
+
+    // ============ CREATE ============
     
     // Create a new driver
     async createDriver(driverData) {
@@ -46,84 +126,9 @@ class DriverService {
         }
     }
 
-      // ─────────────────────────────────────────
-  // LOGIN
-  // ─────────────────────────────────────────
-  async login(payload) {
-    try {
-      const { email, password } = payload;
-
-      const driver = await Driver.findOne({ email: email.toLowerCase() });
-
-      if (!driver) {
-        return {
-          success: false,
-          message: "Invalid email or password",
-        };
-      }
-
-      const isPasswordValid = await bcrypt.compare(password, driver.password);
-
-      if (!isPasswordValid) {
-        return {
-          success: false,
-          message: "Invalid email or password",
-        };
-      }
-
-      driver.lastLogin = new Date();
-      await driver.save();
-
-      const token = jwt.sign(
-        {
-          id: driver._id.toString(),
-          driverId: driver.driverId,
-          email: driver.email,
-          userName: driver.username,
-          role: 'driver',
-        },
-        JWT_SECRET,
-        { expiresIn: JWT_EXPIRES_IN },
-      );
-
-      const driverData = driver.toObject();
-      delete driverData.password;
-
-      return {
-        success: true,
-        message: "Login successful",
-        data: { driver: driverData, token },
-      };
-    } catch (error) {
-      console.error("Error logging in:", error);
-      throw error;
-    }
-  }
-
-  async verifyToken(token) {
-      try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        console.log("Decoded token:", decoded.driverId);
-        const driver = await Driver.findById(decoded.id).select("-password");
-  
-        if (!driver) {
-          return { success: false, message: "Driver not found" };
-        }
-  
-        return { success: true, data: driver };
-      } catch (error) {
-        if (error.name === "TokenExpiredError") {
-          return { success: false, message: "Token has expired" };
-        }
-        if (error.name === "JsonWebTokenError") {
-          return { success: false, message: "Invalid token" };
-        }
-        console.error("Error verifying token:", error);
-        throw error;
-      }
-    }
+    // ============ READ ============
     
-    // Get all drivers
+    // Get all drivers with filters
     async getAllDrivers(filters = {}) {
         try {
             const query = {};
@@ -160,7 +165,6 @@ class DriverService {
     // Get available drivers (for assignment)
     async getAvailableDrivers() {
         try {
-            // Only return drivers who are marked as available
             const drivers = await Driver.find({ 
                 available: true
             })
@@ -203,10 +207,10 @@ class DriverService {
         }
     }
 
-    // Get driver by email (for login)
+    // Get driver by email
     async getDriverByEmail(email) {
         try {
-            const driver = await Driver.findOne({ email });
+            const driver = await Driver.findOne({ email: email.toLowerCase() });
             return driver;
         } catch (error) {
             console.error('Error fetching driver by email:', error);
@@ -214,6 +218,35 @@ class DriverService {
         }
     }
 
+    // Get driver with assigned orders count
+    async getDriverWithOrderCount(driverId) {
+        try {
+            const driver = await Driver.findOne({ driverId }).select('-password');
+            if (!driver) {
+                return { success: false, message: 'Driver not found' };
+            }
+            
+            const Order = require('../models/Order.Model');
+            const assignedCount = await Order.countDocuments({
+                'driverDetails.driverId': driverId,
+                status: { $in: ['Out for Delivery', 'Scheduled'] }
+            });
+            
+            const driverData = driver.toJSON();
+            driverData.activeOrders = assignedCount;
+            
+            return {
+                success: true,
+                data: driverData
+            };
+        } catch (error) {
+            console.error('Error fetching driver with order count:', error);
+            throw error;
+        }
+    }
+
+    // ============ UPDATE ============
+    
     // Update driver
     async updateDriver(driverId, updateData) {
         try {
@@ -257,6 +290,25 @@ class DriverService {
         }
     }
 
+    // Update last login
+    async updateLastLogin(driverId) {
+        try {
+            const driver = await Driver.findOne({ driverId });
+            if (driver) {
+                driver.lastLogin = new Date();
+                driver.updatedAt = new Date();
+                await driver.save();
+                return { success: true };
+            }
+            return { success: false, message: 'Driver not found' };
+        } catch (error) {
+            console.error('Error updating last login:', error);
+            throw error;
+        }
+    }
+
+    // ============ DELETE ============
+    
     // Delete driver
     async deleteDriver(driverId) {
         try {
@@ -276,6 +328,8 @@ class DriverService {
         }
     }
 
+    // ============ DRIVER ASSIGNMENT COUNTS ============
+    
     // Increment assigned orders count
     async incrementAssignedOrders(driverId) {
         try {
@@ -330,7 +384,9 @@ class DriverService {
         }
     }
 
-    // Toggle driver availability (admin only)
+    // ============ AVAILABILITY ============
+    
+    // Toggle driver availability
     async toggleAvailability(driverId) {
         try {
             const driver = await Driver.findOne({ driverId });
@@ -357,6 +413,8 @@ class DriverService {
         }
     }
 
+    // ============ STATISTICS ============
+    
     // Get driver statistics
     async getDriverStats() {
         try {
@@ -378,109 +436,32 @@ class DriverService {
         }
     }
 
-    // Update last login
-    async updateLastLogin(driverId) {
+    // Get driver statistics with order counts
+    async getDriverStatsWithOrders() {
         try {
-            const driver = await Driver.findOne({ driverId });
-            if (driver) {
-                driver.lastLogin = new Date();
-                driver.updatedAt = new Date();
-                await driver.save();
-                return { success: true };
-            }
-            return { success: false, message: 'Driver not found' };
+            const totalDrivers = await Driver.countDocuments();
+            const availableDrivers = await Driver.countDocuments({ available: true });
+            const unavailableDrivers = await Driver.countDocuments({ available: false });
+            
+            const Order = require('../models/Order.Model');
+            const driversWithActiveOrders = await Order.distinct('driverDetails.driverId', {
+                status: { $in: ['Out for Delivery', 'Scheduled'] }
+            });
+            
+            return {
+                success: true,
+                data: {
+                    totalDrivers,
+                    availableDrivers,
+                    unavailableDrivers,
+                    driversWithActiveOrders: driversWithActiveOrders.length
+                }
+            };
         } catch (error) {
-            console.error('Error updating last login:', error);
+            console.error('Error getting driver stats with orders:', error);
             throw error;
         }
     }
-
-
-// Get driver by email (for login) - Add this method
-async getDriverByEmail(email) {
-    try {
-        const driver = await Driver.findOne({ email });
-        return driver;
-    } catch (error) {
-        console.error('Error fetching driver by email:', error);
-        throw error;
-    }
-}
-
-// Update last login - Add this method
-async updateLastLogin(driverId) {
-    try {
-        const driver = await Driver.findOne({ driverId });
-        if (driver) {
-            driver.lastLogin = new Date();
-            driver.updatedAt = new Date();
-            await driver.save();
-            return { success: true };
-        }
-        return { success: false, message: 'Driver not found' };
-    } catch (error) {
-        console.error('Error updating last login:', error);
-        throw error;
-    }
-}
-
-// Get driver with assigned orders count - Add this method
-async getDriverWithOrderCount(driverId) {
-    try {
-        const driver = await Driver.findOne({ driverId }).select('-password');
-        if (!driver) {
-            return { success: false, message: 'Driver not found' };
-        }
-        
-        // Get assigned orders count from Order model
-        const Order = require('../models/Order.Model');
-        const assignedCount = await Order.countDocuments({
-            'driverDetails.driverId': driverId,
-            status: { $in: ['Out for Delivery', 'Scheduled'] }
-        });
-        
-        const driverData = driver.toJSON();
-        driverData.activeOrders = assignedCount;
-        
-        return {
-            success: true,
-            data: driverData
-        };
-    } catch (error) {
-        console.error('Error fetching driver with order count:', error);
-        throw error;
-    }
-}
-
-// Get driver statistics with order counts - Add this method
-async getDriverStatsWithOrders() {
-    try {
-        const totalDrivers = await Driver.countDocuments();
-        const availableDrivers = await Driver.countDocuments({ available: true });
-        const unavailableDrivers = await Driver.countDocuments({ available: false });
-        
-        // Get drivers with active orders
-        const Order = require('../models/Order.Model');
-        const driversWithActiveOrders = await Order.distinct('driverDetails.driverId', {
-            status: { $in: ['Out for Delivery', 'Scheduled'] }
-        });
-        
-        return {
-            success: true,
-            data: {
-                totalDrivers,
-                availableDrivers,
-                unavailableDrivers,
-                driversWithActiveOrders: driversWithActiveOrders.length
-            }
-        };
-    } catch (error) {
-        console.error('Error getting driver stats with orders:', error);
-        throw error;
-    }
-}
-
-
 }
 
 module.exports = new DriverService();
