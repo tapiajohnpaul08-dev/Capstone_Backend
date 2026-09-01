@@ -32,9 +32,8 @@ const corsOptions = {
       'http://localhost:5175',
       'http://127.0.0.1:5173',
       'https://acaps-inventory-system.vercel.app',
-      'https://capstone-delivery-portal.vercel.app/',
+      'https://capstone-delivery-portal.vercel.app',
       'https://capstone-backend-bp5a.onrender.com',
-      'https://capstone-backend-nr2u.onrender.com',  // ← Updated URL
       'https://capstone-acapsshop.vercel.app'   // Add your shop domain
     ];
     
@@ -67,7 +66,6 @@ const io = socketIO(server, {
       'http://127.0.0.1:5173', 
       'https://acaps-inventory-system.vercel.app',
   'https://capstone-backend-bp5a.onrender.com',
-  'https://capstone-backend-nr2u.onrender.com',  // ← Updated URL
   'https://capstone-acapsshop.vercel.app'  
     ],
     credentials: true,
