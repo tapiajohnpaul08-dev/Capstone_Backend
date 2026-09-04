@@ -205,6 +205,7 @@ const orderSchema = new mongoose.Schema({
     deliveryAddress: { type: String, default: "" },
     sameAsCustomer: { type: Boolean, default: false },
   },
+  proofOfDelivery: { type: String, default: null }, // ← Add this field
   updatedBy: { type: String },
 });
 

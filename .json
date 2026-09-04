@@ -1,71 +1,201 @@
 {
-    "id": "ORD-2026-125--COMP",
-    "orderId": "ORD-2026-125--COMP",
-    "orderNumber": "ORD-2026-125--COMP",
-    "status": "Pending",
-    "statusValue": "pending",
-    "paymentStatus": "Unpaid",
-    "isProvided": false,
-    "supplyType": "Company Cups",
-    "hasDesign": false,
-    "deliveryMethod": "Pick-up",
-    "totalAmount": 1750,
-    "quantity": 500,
-    "image": null,
-    "date": "8/20/2026",
-    "createdAt": "2026-08-19T17:09:22.622Z",
-    "items": [
-        {
-            "productId": "PRD-2026-174",
-            "name": "DOUBLE WALLPAPER CUPS",
-            "category": "Paper Cups",
-            "size": "8oz",
-            "quantity": 500,
-            "estimatedTotal": 1750,
-            "image": "https://res.cloudinary.com/vwrxijez/image/upload/v1785916841/beverage/products/product-1785916841196-184280702.jpg",
-            "design": {
-                "source": "no-design",
-                "printSize": "",
-                "printPlacement": "",
-                "designNotes": "No design - plain product, as is.",
-                "files": []
-            }
-        }
-    ],
-    "customerName": "Junebert Hachero",
-    "customerEmail": "braceroroxanne@gmail.com",
-    "customerPhone": "09709406573",
-    "address": "Bustos Bulacan",
-    "postalCode": "3007",
-    "company": "Jear Corp",
-    "fulfillment": {
-        "deliveryAddress": "",
-        "sameAsCustomer": false
+  "_id": {
+    "$oid": "6a9a80282f49d2cdd6797471"
+  },
+  "orderId": "ORD-2026-447--COMP",
+  "customerName": "Junebert Hachero",
+  "customerEmail": "jearlangito@gmail.com",
+  "customerPhone": "09709406573",
+  "address": "Bustos Bulacan",
+  "postalCode": "3007",
+  "quantity": 500,
+  "designDetails": [
+    {
+      "designSource": "no-design",
+      "printSize": "",
+      "printPlacement": "",
+      "designNotes": "No design - plain product, as is.",
+      "files": [],
+      "imagePaths": [],
+      "_id": {
+        "$oid": "6a9a80282f49d2cdd6797472"
+      }
+    }
+  ],
+  "hasDesign": false,
+  "items": [
+    {
+      "productId": "PRD-2026-184",
+      "name": "HARD PLASTIC SHOT",
+      "category": "Plastic Cups",
+      "size": "1oz",
+      "quantity": 500,
+      "designSource": "no-design",
+      "designImage": "",
+      "printSize": "",
+      "printPlacement": "",
+      "designNotes": "No design - plain product, as is.",
+      "files": [],
+      "selectedTemplateId": null,
+      "selectedTemplate": null,
+      "estimatedTotal": 175,
+      "image": "https://res.cloudinary.com/vwrxijez/image/upload/v1785916468/beverage/products/product-1785916465295-41350293.jpg",
+      "proofOfDelivery": null,
+      "_id": {
+        "$oid": "6a9a80282f49d2cdd6797473"
+      }
+    }
+  ],
+  "amount": 175,
+  "totalAmount": 0,
+  "status": "Completed",
+  "paymentStatus": "Paid",
+  "paymentMethod": "cod",
+  "paymentDetails": {
+    "paidAt": {
+      "$date": "2026-09-04T08:26:54.383Z"
     },
-    "designDetails": [
-        {
-            "designSource": "no-design",
-            "printSize": "",
-            "printPlacement": "",
-            "designNotes": "No design - plain product, as is.",
-            "files": [],
-            "imagePaths": [],
-            "_id": "6a85e342b91c82be36f1be69"
-        }
-    ],
-    "expectedDelivery": "8/27/2026",
-    "fromCustomerToCompanyDeliveryDate": null,
-    "preferredDate": null,
-    "preferredTime": "",
-    "productionSchedule": null,
-    "notes": "No Design - Plain product as is | Items: DOUBLE WALLPAPER CUPS",
-    "statusHistory": [
-        {
-            "status": "Pending",
-            "timestamp": "2026-08-19T17:09:22.617Z",
-            "notes": "Order created",
-            "productionSchedule": "",
-            "updatedBy": "6a8577d1fa53b93e2e694e68"
-        }
-    ]
+    "bankName": "",
+    "proofOfPayment": "",
+    "referenceNumber": ""
+  },
+  "isReceived": false,
+  "receivingMode": "Delivery",
+  "productionSchedule": {
+    "$date": "2026-09-04T08:24:00.000Z"
+  },
+  "isProvided": false,
+  "isCartOrder": false,
+  "orderedBy": "6a953abb63b1a0f45e64b420",
+  "expectedDelivery": {
+    "$date": "2026-09-13T00:00:00.000Z"
+  },
+  "preferredDate": null,
+  "fromCustomerToCompanyDeliveryDate": null,
+  "dropOffStatus": "Pending",
+  "notes": "No Design - Plain product as is | Items: HARD PLASTIC SHOT",
+  "statusHistory": [
+    {
+      "status": "Pending",
+      "timestamp": {
+        "$date": "2026-09-04T08:24:08.238Z"
+      },
+      "notes": "Order created",
+      "productionSchedule": "",
+      "updatedBy": "6a953abb63b1a0f45e64b420"
+    },
+    {
+      "status": "Scheduled",
+      "timestamp": {
+        "$date": "2026-09-04T08:24:29.011Z"
+      },
+      "notes": "Order scheduled for production on Sep 4, 2026, 04:24 PM",
+      "productionSchedule": "2026-09-04T16:24",
+      "updatedBy": "John Paul Tapia"
+    },
+    {
+      "status": "In Production",
+      "timestamp": {
+        "$date": "2026-09-04T08:24:31.452Z"
+      },
+      "notes": "Order is now in production",
+      "productionSchedule": "",
+      "updatedBy": "John Paul Tapia"
+    },
+    {
+      "status": "Out for Delivery",
+      "timestamp": {
+        "$date": "2026-09-04T08:24:35.576Z"
+      },
+      "notes": "Order is out for delivery (Driver: Kevin Salas, Phone: 9425125245)",
+      "productionSchedule": "",
+      "updatedBy": "John Paul Tapia",
+      "driverDetails": {
+        "driverName": "Kevin Salas",
+        "driverPhone": "9425125245",
+        "plateNumber": "ADA812",
+        "truckDescription": "White Elf"
+      }
+    },
+    {
+      "status": "Completed",
+      "timestamp": {
+        "$date": "2026-09-04T08:24:37.800Z"
+      },
+      "notes": "Order has been delivered and received",
+      "productionSchedule": "",
+      "updatedBy": "John Paul Tapia",
+      "driverDetails": {
+        "driverName": "Kevin Salas",
+        "driverPhone": "9425125245",
+        "plateNumber": "ADA812",
+        "truckDescription": "White Elf"
+      }
+    },
+    {
+      "status": "Out for Delivery",
+      "timestamp": {
+        "$date": "2026-09-04T08:25:11.192Z"
+      },
+      "notes": "Order is out for delivery (Driver: Kevin Salas, Phone: 9425125245)",
+      "productionSchedule": "",
+      "updatedBy": "John Paul Tapia",
+      "driverDetails": {
+        "driverName": "Kevin Salas",
+        "driverPhone": "9425125245",
+        "plateNumber": "ADA812",
+        "truckDescription": "White Elf"
+      }
+    },
+    {
+      "status": "Completed",
+      "timestamp": {
+        "$date": "2026-09-04T08:26:56.409Z"
+      },
+      "notes": "Order has been delivered and received",
+      "productionSchedule": "",
+      "updatedBy": "Kevin Salas",
+      "driverDetails": {
+        "driverName": "Kevin Salas",
+        "driverPhone": "9425125245",
+        "plateNumber": "ADA812",
+        "truckDescription": "White Elf"
+      }
+    }
+  ],
+  "customer": {
+    "name": "Junebert Hachero",
+    "company": "JCups",
+    "email": "jearlangito@gmail.com",
+    "phone": "09709406573",
+    "saveAsDefault": false
+  },
+  "fulfillment": {
+    "deliveryAddress": "",
+    "sameAsCustomer": false
+  },
+  "orderedAt": {
+    "$date": "2026-09-04T08:24:08.247Z"
+  },
+  "createdAt": {
+    "$date": "2026-09-04T08:24:08.247Z"
+  },
+  "updatedAt": {
+    "$date": "2026-09-04T08:26:56.409Z"
+  },
+  "partialPayments": [],
+  "__v": 6,
+  "updatedBy": "Kevin Salas",
+  "driverDetails": {
+    "driverId": "DRV-7766",
+    "driverName": "Kevin Salas",
+    "driverPhone": "9425125245",
+    "plateNumber": "ADA812",
+    "truckDescription": "White Elf",
+    "assignedAt": {
+      "$date": "2026-09-04T08:25:07.461Z"
+    }
+  },
+  "productName": "HARD PLASTIC SHOT",
+  "size": "1oz"
 }

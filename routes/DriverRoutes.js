@@ -8,11 +8,18 @@ const {
 } = require('../middleware/authMiddleware');
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
+
+// Ensure uploads directory exists
+const uploadDir = 'uploads/proofs/';
+if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+}
 
 // Configure multer for proof of delivery uploads
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
-        cb(null, 'uploads/proofs/');
+        cb(null, uploadDir);
     },
     filename: function (req, file, cb) {
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
@@ -39,7 +46,6 @@ const upload = multer({
 // ============ PUBLIC ROUTES ============
 router.post('/login', DriverController.login);
 
-
 // Profile management
 router.get('/profile', verifyDriverToken, DriverController.getProfile);
 router.put('/profile', verifyDriverToken, DriverController.updateProfile);
@@ -49,18 +55,16 @@ router.patch('/:driverId/toggle-availability', verifyDriverToken, DriverControll
 // Order management
 router.get('/orders/assigned', verifyDriverToken, DriverController.getAssignedOrders);
 router.get('/orders/history', verifyDriverToken, DriverController.getOrderHistory);
+
+// ✅ FIX: Reorder middleware - Authenticate FIRST, then handle file upload
 router.patch(
-    '/orders/:orderId/status', 
-    upload.single('proofOfDelivery'),
-    verifyDriverToken,
-    DriverController.updateOrderStatus
+    '/orders/:orderId/status',
+    verifyDriverToken,              // 1. Authenticate first
+    upload.single('proofOfDelivery'), // 2. Then handle file upload
+    DriverController.updateOrderStatus // 3. Then the controller
 );
 
 // ============ ADMIN ONLY ROUTES ============
-// All routes below require admin authentication
-// These will use both verifyDriverToken (from above) AND verifyAdminToken
-
-// Driver management
 router.post('/create', verifyAdminToken, DriverController.createDriver);
 router.get('/all', verifyAdminToken, DriverController.getAllDrivers);
 router.get('/available', verifyAdminToken, DriverController.getAvailableDrivers);

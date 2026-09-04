@@ -58,6 +58,10 @@ const driverSchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
+    completedOrdersCount: {
+        type: Number,
+        default: 0
+    },
     plateNumber: {
         type: String,
         required: true,

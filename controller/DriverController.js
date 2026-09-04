@@ -240,140 +240,182 @@ class DriverController {
         });
     });
 
-    /**
-     * Update order status - Driver can only mark as 'completed'
-     * Uses OrderService.updateOrderStatus like OrderController
-     * 
-     * OrderController passes: orderId, status, notes, productionSchedule, driverId, user (req.admin)
-     * We need to match this pattern with a proper user object
-     */
-    updateOrderStatus = asyncTryCatch(async (req, res, next) => {
-        console.log('🔵 Driver updateOrderStatus called');
-        console.log('📦 Order ID:', req.params.orderId);
-        console.log('📦 Status:', req.body.status);
-        console.log('👤 Driver ID:', req.user.driverId);
-        
-        const { orderId } = req.params;
-        const { status, notes } = req.body;
-        const { driverId } = req.user;
+// controller/DriverController.js
+updateOrderStatus = asyncTryCatch(async (req, res, next) => {
+    console.log('🔵 Driver updateOrderStatus called');
+    console.log('📦 Order ID:', req.params.orderId);
+    console.log('📦 Status from body:', req.body.status);
+    console.log('📦 File received:', req.file ? 'Yes' : 'No');
+    console.log('👤 Driver ID:', req.user.driverId);
+    
+    const { orderId } = req.params;
+    // Get status from body - with multer, it should be a string
+    let { status, notes } = req.body;
+    const { driverId } = req.user;
 
-        if (!status) {
-            return res.status(400).json({
-                success: false,
-                message: 'Status is required'
-            });
-        }
+    // Debug: Log what we received
+    console.log('📦 Status type:', typeof status);
+    console.log('📦 Status value:', status);
 
-        // Driver can only mark as 'completed'
-        if (status !== 'completed') {
-            return res.status(403).json({
-                success: false,
-                message: 'You can only mark orders as completed'
-            });
-        }
+    // If status is still an object (FormData issue), try to extract it
+    if (status && typeof status === 'object') {
+        console.log('⚠️ Status is an object, attempting to extract...');
+        status = status.toString();
+        console.log('📦 Extracted status:', status);
+    }
 
-        // Verify the order belongs to this driver
-        const order = await Order.findOne({ 
-            _id: orderId,
-            'driverDetails.driverId': driverId
+    if (!status) {
+        return res.status(400).json({
+            success: false,
+            message: 'Status is required'
         });
-        
-        if (!order) {
-            return res.status(404).json({
-                success: false,
-                message: 'Order not found or not assigned to you'
-            });
-        }
+    }
 
-        // Check if order is already completed or cancelled
-        if (order.status === 'Completed' || order.status === 'Cancelled') {
-            return res.status(400).json({
-                success: false,
-                message: `Cannot change status of a ${order.status.toLowerCase()} order`
-            });
-        }
-
-        // Check if order is in the correct state to be completed
-        if (order.status !== 'Out for Delivery') {
-            return res.status(400).json({
-                success: false,
-                message: 'You can only mark orders that are "Out for Delivery" as completed'
-            });
-        }
-
-        // ✅ Get driver info for the user object
-        const driver = await Driver.findOne({ driverId });
-        if (!driver) {
-            return res.status(404).json({
-                success: false,
-                message: 'Driver not found'
-            });
-        }
-
-        // ✅ Create a user object that matches what OrderService expects
-        // OrderService.updatePaymentStatus expects user._id.toString()
-        // So we need to ensure _id is a valid MongoDB ObjectId
-        const user = {
-            _id: driver._id,  // This is the MongoDB ObjectId
-            id: driver._id,
-            driverId: driver.driverId,
-            firstName: driver.firstName,
-            lastName: driver.lastName,
-            email: driver.email,
-            role: 'driver'
-        };
-
-        console.log('👤 User object being passed to OrderService:', {
-            _id: user._id,
-            driverId: user.driverId,
-            email: user.email
+    // Driver can only mark as 'completed'
+    // Accept both 'completed' and 'Completed'
+    const normalizedStatus = status.toLowerCase().trim();
+    if (normalizedStatus !== 'completed') {
+        console.log('❌ Invalid status:', status);
+        return res.status(403).json({
+            success: false,
+            message: 'You can only mark orders as completed'
         });
+    }
 
-        // ✅ Use OrderService.updateOrderStatus (same as OrderController)
-        // OrderController passes: orderId, status, notes, productionSchedule, driverId, user
-        const response = await OrderService.updateOrderStatus(
-            order.orderId,          // orderId (the string identifier)
-            'Completed',            // newStatus (backend status)
-            notes || 'Order marked as completed by driver', // notes
-            null,                   // productionSchedule
-            driverId,               // driverId (for logging/audit)
-            user                    // ✅ Pass the user object with _id
-        );
-
-        if (!response.success) {
-            return res.status(400).json(response);
-        }
-
-        // Handle proof of delivery upload if provided
-        if (req.file && response.data) {
-            const updatedOrder = response.data;
-            updatedOrder.proofOfDelivery = req.file.path || req.file.filename;
-            await updatedOrder.save();
-        }
-
-        // Format response for frontend
-        const formattedOrder = {
-            id: order._id,
-            _id: order._id,
-            orderId: order.orderId,
-            customerName: order.customer?.name || order.customerName,
-            customerPhone: order.customer?.phone || order.customerPhone,
-            address: order.address || order.customer?.address,
-            items: order.items?.map(item => `${item.name} (${item.quantity}pcs)`) || [],
-            total: order.totalAmount || order.amount,
-            status: 'completed',
-            createdAt: order.createdAt || order.orderedAt,
-            notes: order.notes,
-            proofOfDelivery: order.proofOfDelivery || null,
-            completedAt: new Date().toISOString()
-        };
-
-        res.status(200).json({
-            success: true,
-            message: 'Order marked as completed successfully',
-            data: formattedOrder
-        });
+    // Verify the order belongs to this driver
+    const order = await Order.findOne({ 
+        _id: orderId,
+        'driverDetails.driverId': driverId
     });
+    
+    if (!order) {
+        return res.status(404).json({
+            success: false,
+            message: 'Order not found or not assigned to you'
+        });
+    }
+
+    // Check if order is already completed or cancelled
+    if (order.status === 'Completed' || order.status === 'Cancelled') {
+        return res.status(400).json({
+            success: false,
+            message: `Cannot change status of a ${order.status.toLowerCase()} order`
+        });
+    }
+
+    // Check if order is in the correct state to be completed
+    if (order.status !== 'Out for Delivery') {
+        return res.status(400).json({
+            success: false,
+            message: 'You can only mark orders that are "Out for Delivery" as completed'
+        });
+    }
+
+    // Handle proof of delivery upload to Cloudinary
+    let proofImageUrl = null;
+    if (req.file) {
+        try {
+            const cloudinary = require('../config/cloudinary');
+            const fs = require('fs');
+            
+            console.log('📤 Uploading proof to Cloudinary...');
+            
+            const result = await cloudinary.uploader.upload(req.file.path, {
+                folder: 'beverage/proofs',
+                transformation: [
+                    { width: 800, height: 800, crop: 'limit', quality: 'auto' },
+                    { fetch_format: 'auto' }
+                ]
+            });
+            
+            proofImageUrl = result.secure_url;
+            console.log('✅ Proof uploaded to Cloudinary:', proofImageUrl);
+            
+            fs.unlink(req.file.path, (err) => {
+                if (err) console.error('Error deleting temp file:', err);
+            });
+        } catch (uploadError) {
+            console.error('❌ Cloudinary upload error:', uploadError);
+        }
+    }
+
+    // Get driver info
+    const driver = await Driver.findOne({ driverId });
+    if (!driver) {
+        return res.status(404).json({
+            success: false,
+            message: 'Driver not found'
+        });
+    }
+
+    // Create user object for OrderService
+    const user = {
+        _id: driver._id,
+        id: driver._id,
+        driverId: driver.driverId,
+        firstName: driver.firstName,
+        lastName: driver.lastName,
+        email: driver.email,
+        role: 'driver'
+    };
+
+    // Use OrderService.updateOrderStatus
+    const response = await OrderService.updateOrderStatus(
+        order.orderId,
+        'Completed',
+        notes || 'Order marked as completed by driver',
+        null,
+        driverId,
+        user
+    );
+
+    if (!response.success) {
+        return res.status(400).json(response);
+    }
+
+    // ✅ Store proof in statusHistory
+    if (proofImageUrl) {
+        // Find the most recent status history entry for this order
+        if (order.statusHistory && order.statusHistory.length > 0) {
+            // Update the last status history entry with proof
+            const lastHistory = order.statusHistory[order.statusHistory.length - 1];
+            if (lastHistory) {
+                lastHistory.proof = proofImageUrl;
+            }
+        }
+        
+        // Also save proofOfDelivery on the order for easy access
+        order.proofOfDelivery = proofImageUrl;
+        await order.save();
+    }
+
+    // Format response for frontend
+    const formattedOrder = {
+        id: order._id,
+        _id: order._id,
+        orderId: order.orderId,
+        customerName: order.customer?.name || order.customerName,
+        customerPhone: order.customer?.phone || order.customerPhone,
+        address: order.address || order.customer?.address,
+        items: order.items?.map(item => `${item.name} (${item.quantity}pcs)`) || [],
+        total: order.totalAmount || order.amount,
+        status: 'completed',
+        createdAt: order.createdAt || order.orderedAt,
+        notes: order.notes,
+        proofOfDelivery: proofImageUrl || order.proofOfDelivery || null,
+        completedAt: new Date().toISOString()
+    };
+
+    // Update driver's completed orders count
+    driver.completedOrdersCount += 1;
+    await driver.save();
+
+    res.status(200).json({
+        success: true,
+        message: 'Order marked as completed successfully',
+        data: formattedOrder
+    });
+});
 
     // ============ PRIVATE HELPER METHODS ============
     
