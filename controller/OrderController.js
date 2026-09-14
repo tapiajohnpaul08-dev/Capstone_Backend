@@ -162,8 +162,10 @@ class OrderController {
 
     updatePaymentStatus = asyncTryCatch(async (req, res, next) => {
         console.log('🔵 updatePaymentStatus called');
+        console.log('Request body:', req.body);
         const { orderId } = req.params;
-        const { paymentStatus, amountPaid } = req.body;
+        const { paymentStatus, amountPaid, partialPayments } = req.body;
+        console.log('Updated:', req.body);
         const user = req.admin;
         
         if (!paymentStatus) {
@@ -173,7 +175,14 @@ class OrderController {
             });
         }
         
-        const response = await orderService.updatePaymentStatus(orderId, paymentStatus, amountPaid, user);
+        // Pass the partialPayments array to the service
+        const response = await orderService.updatePaymentStatus(
+            orderId, 
+            paymentStatus, 
+            amountPaid, 
+            user, 
+            partialPayments // <-- Pass the partialPayments array
+        );
         const statusCode = response.success ? 200 : 400;
         res.status(statusCode).json(response);
     });

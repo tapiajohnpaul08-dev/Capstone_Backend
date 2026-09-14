@@ -14,6 +14,7 @@ const DESIGN_AND_PRINTING_FEE = 500;
 // ─── Status constants ──────────────────────────────────────────────────────
 const VALID_STATUSES = [
   "Pending",
+  "Confirmed", 
   "Scheduled",
   "In Production",
   "Out for Delivery",
@@ -21,7 +22,7 @@ const VALID_STATUSES = [
   "Cancelled",
 ];
 
-const STATUS_FLOW = ["Pending", "Scheduled", "In Production", "Out for Delivery", "Completed"];
+const STATUS_FLOW = ["Pending", "Confirmed", "Scheduled", "In Production", "Out for Delivery", "Completed"];
 
 function normalizeIncomingStatus(status) {
   if (status === "Ready to Pick-up") return "Out for Delivery";
@@ -164,12 +165,17 @@ class OrderService {
 
         console.log(`✅ Own cups order - hasDesign: ${hasDesign}`);
 
+        // ✅ Record the initial 50% downpayment against the order total
+        const downpaymentAmount = Math.round((payload.amount - (payload.shippingFee || 0)) * 0.5);
+
         newOrder = new Order({
           orderId: `${providedId}-PROV`,
           customerName,
           customerEmail,
           customerPhone,
           address: payload.address,
+          useCourier: payload.useCourier,
+          courierName: payload.courierName,
           postalCode: payload.postalCode || "",
           items: [
             {
@@ -192,9 +198,11 @@ class OrderService {
           designDetails: [designDetails],
           hasDesign: hasDesign, // ✅ Set hasDesign flag based on designSource
           quantity: firstItem.quantity || payload.quantity,
-          amount: totalAmount,
+          amount: payload.amount,
+          downpayment: downpaymentAmount,
           status: "Pending",
-          paymentStatus: "Unpaid",
+          paymentStatus: "Partial",
+          shippingFee: payload.shippingFee || 0,
           receivingMode: payload.receivingMode,
           expectedDelivery,
           preferredDate: payload.preferredDate || null,
@@ -218,6 +226,14 @@ class OrderService {
           },
           paymentMethod: payload.paymentMethod || "cod",
           paymentDetails: payload.paymentDetails || null,
+          partialPayments: [
+            {
+              amount: downpaymentAmount,
+              referenceNumber: payload.paymentDetails || null,
+              date: new Date(),
+              updatedBy: orderedById,
+            },
+          ],
         });
 
         await newOrder.save();
@@ -338,6 +354,9 @@ class OrderService {
 
           console.log(`✅ Company order - hasDesign: ${hasDesign}`);
 
+          // ✅ Record the initial 50% downpayment against the order total
+          const downpaymentAmount = Math.round((payload.amount - (payload.shippingFee || 0)) * 0.5);
+
           const OrderId = await generateId("ORD");
 
           newOrder = new Order({
@@ -346,14 +365,18 @@ class OrderService {
             customerEmail,
             customerPhone,
             address: payload.address,
+            useCourier: payload.useCourier,
+            courierName: payload.courierName,
             postalCode: payload.postalCode || "",
             items: processedItems,
             hasDesign: hasDesign, // ✅ Set hasDesign flag based on designSource
             designDetails: [designDetails],
             quantity: processedItems.reduce((sum, i) => sum + i.quantity, 0),
-            amount: totalAmount,
+            amount: payload.amount,
+            downpayment: downpaymentAmount,
             status: "Pending",
-            paymentStatus: "Unpaid",
+            paymentStatus: "Partial",
+            shippingFee: payload.shippingFee || 0,
             receivingMode: payload.receivingMode,
             expectedDelivery,
             preferredDate: payload.preferredDate || null,
@@ -371,6 +394,14 @@ class OrderService {
             },
             paymentMethod: payload.paymentMethod || "cod",
             paymentDetails: payload.paymentDetails || null,
+            partialPayments: [
+              {
+                amount: downpaymentAmount,
+                referenceNumber: payload.paymentDetails?.referenceNumber || null,
+                date: new Date(),
+                updatedBy: orderedById,
+              },
+            ],
           });
 
           await newOrder.save({ session });
@@ -486,6 +517,9 @@ class OrderService {
       files: firstItem.files || [],
     };
 
+    // ✅ Record the initial 50% downpayment against the order total
+    const downpaymentAmount = Math.round((payload.amount - (payload.shippingFee || 0)) * 0.5);
+
     const OrderId = await generateId("ORD");
     const newOrder = new Order({
       orderId: `${OrderId}-COMP`,
@@ -493,14 +527,18 @@ class OrderService {
       customerEmail,
       customerPhone,
       address: payload.address,
+      useCourier: payload.useCourier,
+      courierName: payload.courierName,
       postalCode: payload.postalCode || "",
       items: processedItems,
       hasDesign: hasDesign, // ✅ Set hasDesign flag based on designSource
       designDetails: [designDetails],
       quantity: processedItems.reduce((sum, i) => sum + i.quantity, 0),
-      amount: totalAmount,
+      amount: payload.amount,
+      downpayment: downpaymentAmount,
       status: "Pending",
-      paymentStatus: "Unpaid",
+      paymentStatus: "Partial",
+      shippingFee: payload.shippingFee || 0,
       receivingMode: payload.receivingMode,
       expectedDelivery,
       preferredDate: payload.preferredDate || null,
@@ -516,6 +554,13 @@ class OrderService {
       },
       paymentMethod: payload.paymentMethod || "cod",
       paymentDetails: payload.paymentDetails || null,
+      partialPayments: [
+        {
+          amount: downpaymentAmount,
+          date: new Date(),
+          updatedBy: orderedById,
+        },
+      ],
     });
 
     await newOrder.save();
@@ -933,21 +978,38 @@ class OrderService {
     }
   }
 
-  // ─────────────────────────────────────────
-  // UPDATE PAYMENT STATUS
-  // ─────────────────────────────────────────
-  async updatePaymentStatus(orderId, paymentStatus, amountPaid = null, user = null) {
-    try {
-      const validStatuses = ["Paid", "Partial", "Unpaid"];
-      if (!validStatuses.includes(paymentStatus)) {
-        return { success: false, message: "Invalid payment status" };
-      }
+// ─────────────────────────────────────────
+// UPDATE PAYMENT STATUS
+// ─────────────────────────────────────────
+async updatePaymentStatus(orderId, paymentStatus, amountPaid = null, user = null, partialPayments = null) {
+  try {
+    const validStatuses = ["Paid", "Partial", "Unpaid"];
+    if (!validStatuses.includes(paymentStatus)) {
+      return { success: false, message: "Invalid payment status" };
+    }
 
-      const order = await Order.findOne({ orderId });
-      if (!order) {
-        return { success: false, message: "Order not found" };
-      }
+    const order = await Order.findOne({ orderId });
+    if (!order) {
+      return { success: false, message: "Order not found" };
+    }
 
+    // If partialPayments array is provided, use it directly
+    if (partialPayments !== null && Array.isArray(partialPayments)) {
+      order.partialPayments = partialPayments;
+      // Calculate total paid from the provided array
+      const totalPaid = partialPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+      
+      // Auto-update payment status based on total paid
+      const totalAmount = order.amount || order.totalAmount || 0;
+      if (totalPaid >= totalAmount && totalAmount > 0) {
+        paymentStatus = 'Paid';
+      } else if (totalPaid > 0) {
+        paymentStatus = 'Partial';
+      } else {
+        paymentStatus = 'Unpaid';
+      }
+    } else {
+      // Original logic for single payment update
       if (paymentStatus === "Partial" && (amountPaid === null || amountPaid === undefined)) {
         return { success: false, message: "amountPaid is required when marking payment as Partial" };
       }
@@ -958,38 +1020,39 @@ class OrderService {
         return { success: false, message: "amountPaid must be less than the order total for a Partial payment. Use 'Paid' instead." };
       }
 
-      const oldPaymentStatus = order.paymentStatus;
-      order.paymentStatus = paymentStatus;
-
       if (paymentStatus === "Partial" && amountPaid) {
         order.partialPayments = order.partialPayments || [];
         order.partialPayments.push({
           amount: amountPaid,
           date: new Date(),
-          updatedBy: user ? user._id.toString() : null,
+          updatedBy: user ? (user._id?.toString() || user.email || 'Admin') : 'Admin',
         });
       }
-
-      if (paymentStatus === "Paid") {
-        order.paymentDetails = order.paymentDetails || {};
-        order.paymentDetails.paidAt = new Date();
-      }
-
-      order.updatedAt = new Date();
-      if (user) order.updatedBy = user._id.toString();
-
-      await order.save();
-
-      return {
-        success: true,
-        message: `Payment status updated from ${oldPaymentStatus} to ${paymentStatus}`,
-        data: order,
-      };
-    } catch (error) {
-      console.error("Error updating payment status:", error);
-      throw error;
     }
+
+    const oldPaymentStatus = order.paymentStatus;
+    order.paymentStatus = paymentStatus;
+
+    if (paymentStatus === "Paid") {
+      order.paymentDetails = order.paymentDetails || {};
+      order.paymentDetails.paidAt = new Date();
+    }
+
+    order.updatedAt = new Date();
+    if (user) order.updatedBy = user._id?.toString() || user.email || 'Admin';
+
+    await order.save();
+
+    return {
+      success: true,
+      message: `Payment status updated from ${oldPaymentStatus} to ${paymentStatus}`,
+      data: order,
+    };
+  } catch (error) {
+    console.error("Error updating payment status:", error);
+    throw error;
   }
+}
 
   // ─────────────────────────────────────────
   // GET ORDER STATISTICS

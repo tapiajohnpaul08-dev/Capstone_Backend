@@ -100,6 +100,7 @@ const driverDetailsSchema = new mongoose.Schema(
 const partialPaymentSchema = new mongoose.Schema(
   {
     amount: { type: Number, required: true },
+    referenceNumber: { type: String, default: null },
     date: { type: Date, default: Date.now },
     updatedBy: { type: String },
   },
@@ -122,6 +123,7 @@ const orderSchema = new mongoose.Schema({
   hasDesign: { type: Boolean, default: false },
   items: [orderItemSchema],
   amount: { type: Number, default: 0 },
+  downpayment: { type: Number, default: 0 },
   totalAmount: { type: Number, default: 0 },
   // NOTE: "Ready to Pick-up" is intentionally NOT a DB status. It is a
   // *display-only* alias for "Out for Delivery" shown to admins when
@@ -133,6 +135,7 @@ const orderSchema = new mongoose.Schema({
     type: String,
     enum: [
       "Pending",
+      "Confirmed",
       "Scheduled",
       "In Production",
       "Out for Delivery",
@@ -144,7 +147,7 @@ const orderSchema = new mongoose.Schema({
   paymentStatus: {
     type: String,
     enum: ["Unpaid", "Partial", "Paid"],
-    default: "Unpaid",
+    default: "Partial",
   },
   paymentMethod: {
     type: String,
@@ -157,8 +160,11 @@ const orderSchema = new mongoose.Schema({
     paidAt: { type: Date, default: null },
     proofOfPayment: { type: String, default: "" },
   },
+  shippingFee: { type: Number, default: 0 },
   isReceived: { type: Boolean, default: false },
   receivingMode: { type: String, enum: ["Pick-up", "Delivery"] },
+  useCourier: { type: Boolean, default: false },
+  courierName: { type: String, default: "" },
   deliveryMethod: { type: String, enum: ["Delivery", "Pick-up"] },
   supplyType: { type: String, enum: ["Own Items", "Company Cups"] },
   type: { type: String, enum: ["own-items", "company-product"] },
