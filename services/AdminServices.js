@@ -16,7 +16,7 @@ class AdminService {
       const existingAdmin = await Admin.findOne({
         $or: [
           { email: payload.email.toLowerCase() },
-          { username: payload.username },
+          { username: payload.userName },
         ],
       });
 

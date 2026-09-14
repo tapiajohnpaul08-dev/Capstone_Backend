@@ -229,7 +229,7 @@ class OrderService {
           partialPayments: [
             {
               amount: downpaymentAmount,
-              referenceNumber: payload.paymentDetails || null,
+              referenceNumber: payload.paymentDetails?.referenceNumber || null,
               date: new Date(),
               updatedBy: orderedById,
             },
