@@ -1,4 +1,3 @@
-// services/SocketServices.js
 const Conversation = require('../models/Conversation.Model');
 const Message = require('../models/Message.Model');
 const generateId = require('../utils/generateId');
@@ -160,6 +159,35 @@ class SocketService {
       console.error('Error saving message:', error);
       socket.emit('error', { message: 'Failed to save message' });
       return null;
+    }
+  }
+
+    // ─────────────────────────────────────────
+  // EMIT ORDER NEGOTIATION UPDATE
+  // Called when admin edits an order's pricing fields via the chat.
+  // Broadcasts the updated order to everyone in the conversation room.
+  // ─────────────────────────────────────────
+  emitOrderNegotiationUpdate(conversationId, order) {
+    try {
+      if (!conversationId || !order) return;
+      this.io.to(`conv_${conversationId}`).emit('order-negotiation-updated', order);
+      console.log(`📤 Emitted order-negotiation-updated for conv ${conversationId}`);
+    } catch (error) {
+      console.error('Error emitting order-negotiation-updated:', error);
+    }
+  }
+
+  // ─────────────────────────────────────────
+  // EMIT QUOTE RESPONSE
+  // Called when customer accepts/rejects a quote in the chat.
+  // ─────────────────────────────────────────
+  emitQuoteResponse(conversationId, quoteResponse) {
+    try {
+      if (!conversationId || !quoteResponse) return;
+      this.io.to(`conv_${conversationId}`).emit('quote-responded', quoteResponse);
+      console.log(`📤 Emitted quote-responded for conv ${conversationId}`);
+    } catch (error) {
+      console.error('Error emitting quote-responded:', error);
     }
   }
 

@@ -34,5 +34,6 @@ router.put('/admin/orders/:orderId', orderController.updateOrder);
 router.patch('/admin/orders/:orderId/status', orderController.updateOrderStatus);
 router.patch('/admin/orders/:orderId/payment', orderController.updatePaymentStatus);
 router.delete('/admin/orders/:orderId', orderController.deleteOrder);
-
+router.patch('/admin/orders/:orderId/negotiate', orderController.negotiateOrder);   // ← NEW
+router.post('/admin/orders/:orderId/confirm-with-downpayment', orderController.confirmWithDownpayment);
 module.exports = router;

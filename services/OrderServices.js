@@ -8,13 +8,16 @@ const DriverService = require("./DriverServices");
 const Customer = require("../models/Customer.Model");
 const generateId = require("../utils/generateItemId");
 
+const Message = require('../models/Message.Model');
+
+
 // ─── Constants ──────────────────────────────────────────────────────────────
 const DESIGN_AND_PRINTING_FEE = 500;
 
 // ─── Status constants ──────────────────────────────────────────────────────
 const VALID_STATUSES = [
   "Pending",
-  "Confirmed", 
+  "Confirmed",
   "Scheduled",
   "In Production",
   "Out for Delivery",
@@ -39,53 +42,40 @@ function isValidTransition(currentStatus, nextStatus) {
 }
 
 /**
- * ✅ Helper function to determine if an item has a design
- * Returns true if designSource is 'upload' or 'saved'
- * Returns false if designSource is 'no-design' or not provided
+ * Helper: determine if an item has a design
  */
 function hasValidDesign(item) {
   if (!item) return false;
-  
-  // If designSource is explicitly 'no-design', return false
-  if (item.designSource === 'no-design') {
-    return false;
-  }
-  
-  // If designSource is 'upload' or 'saved', return true
-  if (item.designSource === 'upload' || item.designSource === 'saved') {
-    return true;
-  }
-  
-  // Check for files (uploaded design)
-  if (item.files && item.files.length > 0) {
-    return true;
-  }
-  
-  // Check for design image
-  if (item.designImage && item.designImage.length > 0) {
-    return true;
-  }
-  
-  // Check for selected template (saved design)
-  if (item.selectedTemplateId || item.selectedTemplate) {
-    return true;
-  }
-  
-  // Check for design notes (could indicate custom design)
+  if (item.designSource === 'no-design') return false;
+  if (item.designSource === 'upload' || item.designSource === 'saved') return true;
+  if (item.files && item.files.length > 0) return true;
+  if (item.designImage && item.designImage.length > 0) return true;
+  if (item.selectedTemplateId || item.selectedTemplate) return true;
   if (item.designNotes && item.designNotes.trim().length > 0) {
-    // But only if it's not the default "no design" note
-    if (item.designNotes !== 'No design - plain product, as is.' && 
+    if (item.designNotes !== 'No design - plain product, as is.' &&
         item.designNotes !== 'No design - plain product as is') {
       return true;
     }
   }
-  
   return false;
 }
 
 class OrderService {
   // ─────────────────────────────────────────
-  // CREATE ORDER
+  // HELPER: pick unit price by bulk tier
+  // (used by createOrder + negotiateOrder)
+  // ─────────────────────────────────────────
+  _getUnitPriceForQuantity(sizeObj, qty) {
+    if (!sizeObj) return 0;
+    if (qty >= 5000 && sizeObj.bulkPrices?.[5000]) return sizeObj.bulkPrices[5000] / 5000;
+    if (qty >= 2000 && sizeObj.bulkPrices?.[2000]) return sizeObj.bulkPrices[2000] / 2000;
+    if (qty >= 1000 && sizeObj.bulkPrices?.[1000]) return sizeObj.bulkPrices[1000] / 1000;
+    if (qty >= 500 && sizeObj.bulkPrices?.[500]) return sizeObj.bulkPrices[500] / 500;
+    return sizeObj.price;
+  }
+
+  // ─────────────────────────────────────────
+  // CREATE ORDER (updated: no auto-downpayment, server-computed amount)
   // ─────────────────────────────────────────
   async createOrder(payload, user = null, userType = null) {
     const session = await mongoose.startSession();
@@ -105,7 +95,7 @@ class OrderService {
         customerEmail = customerEmail || user.email;
         customerName = customerName || user.name;
         customerPhone = customerPhone || user.phone;
-        
+
         const customer = await Customer.findOne({ _id: user._id });
         if (customer) {
           customerId = customer._id;
@@ -147,13 +137,13 @@ class OrderService {
         const firstItem = payload.items && payload.items.length > 0 ? payload.items[0] : {};
         const providedId = await generateId("ORD");
 
-        // OWN CUPS: ₱500 flat fee (covers both printing service AND design if applicable)
-        const totalAmount = DESIGN_AND_PRINTING_FEE;
-        
-        // ✅ Check if there's a valid design using the helper function
+        // OWN CUPS: ₱500 flat fee (design + printing service)
+        const designFee = DESIGN_AND_PRINTING_FEE;
+        const shippingFee = Number(payload.shippingFee) || 0;
+        const serverAmount = designFee + shippingFee;
+
         const hasDesign = hasValidDesign(firstItem) || hasValidDesign(payload);
 
-        // Build design details from first item or payload
         const designDetails = {
           designSource: firstItem.designSource || payload.designSource || "upload",
           designImage: firstItem.designImage || payload.designImage || "",
@@ -164,9 +154,7 @@ class OrderService {
         };
 
         console.log(`✅ Own cups order - hasDesign: ${hasDesign}`);
-
-        // ✅ Record the initial 50% downpayment against the order total
-        const downpaymentAmount = Math.round((payload.amount - (payload.shippingFee || 0)) * 0.5);
+        console.log(`✅ Own cups order - serverAmount: ${serverAmount}`);
 
         newOrder = new Order({
           orderId: `${providedId}-PROV`,
@@ -196,13 +184,15 @@ class OrderService {
             },
           ],
           designDetails: [designDetails],
-          hasDesign: hasDesign, // ✅ Set hasDesign flag based on designSource
+          hasDesign: hasDesign,
           quantity: firstItem.quantity || payload.quantity,
-          amount: payload.amount,
-          downpayment: downpaymentAmount,
+          amount: serverAmount,
+          totalAmount: serverAmount,
+          designFee: designFee,
+          shippingFee: shippingFee,
+          downpayment: 0,
           status: "Pending",
-          paymentStatus: "Partial",
-          shippingFee: payload.shippingFee || 0,
+          paymentStatus: "Unpaid",
           receivingMode: payload.receivingMode,
           expectedDelivery,
           preferredDate: payload.preferredDate || null,
@@ -226,14 +216,7 @@ class OrderService {
           },
           paymentMethod: payload.paymentMethod || "cod",
           paymentDetails: payload.paymentDetails || null,
-          partialPayments: [
-            {
-              amount: downpaymentAmount,
-              referenceNumber: payload.paymentDetails?.referenceNumber || null,
-              date: new Date(),
-              updatedBy: orderedById,
-            },
-          ],
+          partialPayments: [],
         });
 
         await newOrder.save();
@@ -267,7 +250,7 @@ class OrderService {
       ];
 
       let txnResult;
-      
+
       try {
         await session.withTransaction(async () => {
           const processedItems = [];
@@ -295,20 +278,11 @@ class OrderService {
               );
             }
 
-            let unitPrice = sizeObj.price;
-            const qty = item.quantity;
-            if (qty >= 5000 && sizeObj.bulkPrices?.[5000]) unitPrice = sizeObj.bulkPrices[5000] / 5000;
-            else if (qty >= 2000 && sizeObj.bulkPrices?.[2000]) unitPrice = sizeObj.bulkPrices[2000] / 2000;
-            else if (qty >= 1000 && sizeObj.bulkPrices?.[1000]) unitPrice = sizeObj.bulkPrices[1000] / 1000;
-            else if (qty >= 500 && sizeObj.bulkPrices?.[500]) unitPrice = sizeObj.bulkPrices[500] / 500;
-
-            const itemTotal = unitPrice * qty;
+            const unitPrice = this._getUnitPriceForQuantity(sizeObj, item.quantity);
+            const itemTotal = unitPrice * item.quantity;
             productTotal += itemTotal;
 
-            // ✅ Check if this item has a valid design using the helper function
-            if (hasValidDesign(item)) {
-              hasDesign = true;
-            }
+            if (hasValidDesign(item)) hasDesign = true;
 
             processedItems.push({
               productId: item.productId,
@@ -332,16 +306,12 @@ class OrderService {
             await product.save({ session });
           }
 
-          // ✅ COMPANY PRODUCT: Add design fee (₱500) ONLY if there's a design
-          let totalAmount = productTotal;
-          if (hasDesign) {
-            totalAmount += DESIGN_AND_PRINTING_FEE;
-            console.log("✅ Design fee added to company product order");
-          } else {
-            console.log("❌ No design fee added - no design provided");
-          }
+          const designFee = hasDesign ? DESIGN_AND_PRINTING_FEE : 0;
+          const shippingFee = Number(payload.shippingFee) || 0;
+          const serverAmount = productTotal + designFee + shippingFee;
 
-          // ✅ Build design details from the first item
+          console.log(`✅ Company order - hasDesign: ${hasDesign}, amount: ${serverAmount}`);
+
           const firstItem = processedItems[0] || {};
           const designDetails = {
             designSource: firstItem.designSource || "upload",
@@ -351,11 +321,6 @@ class OrderService {
             designNotes: firstItem.designNotes || "",
             files: firstItem.files || [],
           };
-
-          console.log(`✅ Company order - hasDesign: ${hasDesign}`);
-
-          // ✅ Record the initial 50% downpayment against the order total
-          const downpaymentAmount = Math.round((payload.amount - (payload.shippingFee || 0)) * 0.5);
 
           const OrderId = await generateId("ORD");
 
@@ -369,14 +334,16 @@ class OrderService {
             courierName: payload.courierName,
             postalCode: payload.postalCode || "",
             items: processedItems,
-            hasDesign: hasDesign, // ✅ Set hasDesign flag based on designSource
+            hasDesign: hasDesign,
             designDetails: [designDetails],
             quantity: processedItems.reduce((sum, i) => sum + i.quantity, 0),
-            amount: payload.amount,
-            downpayment: downpaymentAmount,
+            amount: serverAmount,
+            totalAmount: serverAmount,
+            designFee: designFee,
+            shippingFee: shippingFee,
+            downpayment: 0,
             status: "Pending",
-            paymentStatus: "Partial",
-            shippingFee: payload.shippingFee || 0,
+            paymentStatus: "Unpaid",
             receivingMode: payload.receivingMode,
             expectedDelivery,
             preferredDate: payload.preferredDate || null,
@@ -394,14 +361,7 @@ class OrderService {
             },
             paymentMethod: payload.paymentMethod || "cod",
             paymentDetails: payload.paymentDetails || null,
-            partialPayments: [
-              {
-                amount: downpaymentAmount,
-                referenceNumber: payload.paymentDetails?.referenceNumber || null,
-                date: new Date(),
-                updatedBy: orderedById,
-              },
-            ],
+            partialPayments: [],
           });
 
           await newOrder.save({ session });
@@ -464,20 +424,11 @@ class OrderService {
         };
       }
 
-      let unitPrice = sizeObj.price;
-      const qty = item.quantity;
-      if (qty >= 5000 && sizeObj.bulkPrices?.[5000]) unitPrice = sizeObj.bulkPrices[5000] / 5000;
-      else if (qty >= 2000 && sizeObj.bulkPrices?.[2000]) unitPrice = sizeObj.bulkPrices[2000] / 2000;
-      else if (qty >= 1000 && sizeObj.bulkPrices?.[1000]) unitPrice = sizeObj.bulkPrices[1000] / 1000;
-      else if (qty >= 500 && sizeObj.bulkPrices?.[500]) unitPrice = sizeObj.bulkPrices[500] / 500;
-
-      const itemTotal = unitPrice * qty;
+      const unitPrice = this._getUnitPriceForQuantity(sizeObj, item.quantity);
+      const itemTotal = unitPrice * item.quantity;
       productTotal += itemTotal;
 
-      // ✅ Check if this item has a valid design using the helper function
-      if (hasValidDesign(item)) {
-        hasDesign = true;
-      }
+      if (hasValidDesign(item)) hasDesign = true;
 
       processedItems.push({
         productId: item.productId,
@@ -501,11 +452,9 @@ class OrderService {
       await product.save();
     }
 
-    // ✅ COMPANY PRODUCT: Add design fee (₱500) ONLY if there's a design
-    let totalAmount = productTotal;
-    if (hasDesign) {
-      totalAmount += DESIGN_AND_PRINTING_FEE;
-    }
+    const designFee = hasDesign ? DESIGN_AND_PRINTING_FEE : 0;
+    const shippingFee = Number(payload.shippingFee) || 0;
+    const serverAmount = productTotal + designFee + shippingFee;
 
     const firstItem = processedItems[0] || {};
     const designDetails = {
@@ -516,9 +465,6 @@ class OrderService {
       designNotes: firstItem.designNotes || "",
       files: firstItem.files || [],
     };
-
-    // ✅ Record the initial 50% downpayment against the order total
-    const downpaymentAmount = Math.round((payload.amount - (payload.shippingFee || 0)) * 0.5);
 
     const OrderId = await generateId("ORD");
     const newOrder = new Order({
@@ -531,14 +477,16 @@ class OrderService {
       courierName: payload.courierName,
       postalCode: payload.postalCode || "",
       items: processedItems,
-      hasDesign: hasDesign, // ✅ Set hasDesign flag based on designSource
+      hasDesign: hasDesign,
       designDetails: [designDetails],
       quantity: processedItems.reduce((sum, i) => sum + i.quantity, 0),
-      amount: payload.amount,
-      downpayment: downpaymentAmount,
+      amount: serverAmount,
+      totalAmount: serverAmount,
+      designFee: designFee,
+      shippingFee: shippingFee,
+      downpayment: 0,
       status: "Pending",
-      paymentStatus: "Partial",
-      shippingFee: payload.shippingFee || 0,
+      paymentStatus: "Unpaid",
       receivingMode: payload.receivingMode,
       expectedDelivery,
       preferredDate: payload.preferredDate || null,
@@ -554,13 +502,7 @@ class OrderService {
       },
       paymentMethod: payload.paymentMethod || "cod",
       paymentDetails: payload.paymentDetails || null,
-      partialPayments: [
-        {
-          amount: downpaymentAmount,
-          date: new Date(),
-          updatedBy: orderedById,
-        },
-      ],
+      partialPayments: [],
     });
 
     await newOrder.save();
@@ -609,8 +551,16 @@ class OrderService {
   // ─────────────────────────────────────────
   // UPDATE ORDER STATUS
   // ─────────────────────────────────────────
-  async updateOrderStatus(orderId, newStatus, notes, productionSchedule = null, driverId = null, user = null) {
-    try {
+  async updateOrderStatus(
+    orderId,
+    newStatus,
+    notes,
+    productionSchedule = null,
+    driverId = null,
+    user = null,
+    options = {}
+  ) {
+    const { codCollected = false } = options;    try {
       newStatus = normalizeIncomingStatus(newStatus);
 
       console.log(`🔵 Updating order status for ${orderId} to ${newStatus}`);
@@ -622,6 +572,27 @@ class OrderService {
       const order = await Order.findOne({ orderId });
       if (!order) {
         return { success: false, message: "Order not found" };
+      }
+
+      if (newStatus === 'Confirmed' && order.paymentStatus === 'Unpaid') {
+        return {
+          success: false,
+          message: 'Cannot confirm an order before a downpayment is verified. Use the payment verification flow in chat.',
+        };
+      }
+
+      if (newStatus === "Completed") {
+        const needsCodCollection = order.paymentStatus === "Partial";
+        const canAutoPay = !needsCodCollection || codCollected === true;
+
+        if (canAutoPay) {
+          await this.updatePaymentStatus(orderId, "Paid", order.totalAmount, user);
+        } else {
+          // Leave paymentStatus as Partial — driver didn't confirm collection
+          console.log(
+            `⚠️ Order ${order.orderId} completed but COD not confirmed — paymentStatus stays "${order.paymentStatus}"`
+          );
+        }
       }
 
       if (order.status === "Completed" || order.status === "Cancelled") {
@@ -642,7 +613,6 @@ class OrderService {
 
       const oldStatus = order.status;
 
-      // ─── SCHEDULED ──────────────────────────────────────────────────────
       if (newStatus === "Scheduled") {
         const scheduleValue = productionSchedule || order.productionSchedule;
         if (!scheduleValue) {
@@ -660,7 +630,6 @@ class OrderService {
         order.productionSchedule = scheduleDate;
       }
 
-      // ─── OUT FOR DELIVERY ──────────────────────────────────────────────
       if (newStatus === "Out for Delivery" && order.receivingMode === "Delivery") {
         if (!driverId) {
           return { success: false, message: "A driver must be assigned before marking as Out for Delivery" };
@@ -686,7 +655,6 @@ class OrderService {
         console.log(`✅ Driver ${driverId} assigned orders count incremented to ${incrementResult.data.assignedOrdersCount}`);
       }
 
-      // ─── COMPLETED OR CANCELLED ────────────────────────────────────────
       if ((newStatus === "Completed" || newStatus === "Cancelled") && order.driverDetails?.driverId) {
         const decrementResult = await DriverService.decrementAssignedOrders(order.driverDetails.driverId);
         if (decrementResult.success) {
@@ -696,7 +664,6 @@ class OrderService {
         }
       }
 
-      // ─── CANCELLED: restore inventory ─────────────────────────────────
       if (newStatus === "Cancelled" && order.status !== "Cancelled" && !order.isProvided) {
         for (const item of order.items) {
           if (item.productId) {
@@ -713,33 +680,28 @@ class OrderService {
         }
       }
 
-      if (newStatus === "Completed") {
-        await this.updatePaymentStatus(orderId, "Paid", order.totalAmount, user);
-      }
-
-      // ─── UPDATE ORDER ─────────────────────────────────────────────────
       order.status = newStatus;
 
       function generateNotes(status) {
         const receivingMode = order?.receivingMode || order?.deliveryMethod || 'Delivery';
         const isPickup = receivingMode === 'Pick-up';
-        
+
         switch (status) {
           case "Scheduled":
-            const scheduleDate = order?.productionSchedule 
-              ? new Date(order.productionSchedule).toLocaleDateString('en-PH', { 
-                  month: 'short', 
-                  day: 'numeric', 
+            const scheduleDate = order?.productionSchedule
+              ? new Date(order.productionSchedule).toLocaleDateString('en-PH', {
+                  month: 'short',
+                  day: 'numeric',
                   year: 'numeric',
                   hour: '2-digit',
                   minute: '2-digit'
                 })
               : 'Date not set';
             return `Order scheduled for production on ${scheduleDate}`;
-            
+
           case "In Production":
             return "Order is now in production";
-            
+
           case "Out for Delivery":
             if (isPickup) {
               return `Order is ready for pickup at the store`;
@@ -747,16 +709,16 @@ class OrderService {
             const driverName = order?.driverDetails?.driverName || 'Not assigned';
             const driverPhone = order?.driverDetails?.driverPhone || 'No phone';
             return `Order is out for delivery (Driver: ${driverName}, Phone: ${driverPhone})`;
-            
+
           case "Completed":
             if (isPickup) {
               return "Order has been picked up by customer";
             }
             return "Order has been delivered and received";
-            
+
           case "Cancelled":
             return "Order has been cancelled";
-            
+
           default:
             return "";
         }
@@ -791,6 +753,380 @@ class OrderService {
       };
     } catch (error) {
       console.error("Error updating order status:", error);
+      throw error;
+    }
+  }
+
+  // ─────────────────────────────────────────
+  // NEGOTIATE ORDER (admin ↔ customer)
+  //
+  // Allowed ONLY when status === 'Pending' and paymentStatus === 'Unpaid'.
+  //
+  // Editable fields:
+  //   - quantity      → restores old qty to stock, deducts new qty
+  //   - unitPrice     → manual override (bypasses bulk tier)
+  //   - designFee     → admin can adjust the design fee
+  //   - deliveryMethod → 'Pick-up' | 'Delivery'
+  //   - shippingFee   → admin can adjust
+  //
+  // Quantity is the top-level order quantity (matches items[0].quantity).
+  // Unit price override applies to the first item (bulk orders use one size).
+  // ─────────────────────────────────────────
+  async negotiateOrder(orderId, updates, admin) {
+    try {
+      const order = await Order.findOne({ orderId });
+      if (!order) {
+        return { success: false, message: "Order not found" };
+      }
+
+      // ─── Guards: only Pending + Unpaid orders can be negotiated ────────
+      if (order.status !== "Pending") {
+        return {
+          success: false,
+          message: `Cannot negotiate an order with status "${order.status}". Only Pending orders can be negotiated.`,
+        };
+      }
+      if (order.paymentStatus !== "Unpaid") {
+        return {
+          success: false,
+          message: `Cannot negotiate an order with payment status "${order.paymentStatus}". Order is locked.`,
+        };
+      }
+
+      const adminName = admin
+        ? admin.firstName
+          ? `${admin.firstName} ${admin.lastName}`
+          : admin.email || admin._id?.toString() || "Admin"
+        : "Admin";
+      const adminId = admin?._id?.toString() || admin?.adminId || "";
+
+      const historyEntries = [];
+      const oldSnapshot = {
+        quantity: order.quantity,
+        unitPrice: order.items?.[0]?.estimatedTotal && order.items?.[0]?.quantity
+          ? order.items[0].estimatedTotal / order.items[0].quantity
+          : null,
+        designFee: order.designFee,
+        deliveryMethod: order.receivingMode,
+        shippingFee: order.shippingFee,
+        amount: order.amount,
+      };
+
+      // ─── Quantity (with stock delta) ────────────────────────────────────
+      if (updates.quantity !== undefined && updates.quantity !== null) {
+        const newQty = Number(updates.quantity);
+        if (isNaN(newQty) || newQty <= 0) {
+          return { success: false, message: "Quantity must be a positive number" };
+        }
+        if (newQty !== order.quantity) {
+          const oldQty = order.quantity;
+
+          if (!order.isProvided) {
+            const firstItem = order.items?.[0];
+            if (firstItem && firstItem.productId) {
+              const product = await Product.findOne({ id: firstItem.productId });
+              if (!product) {
+                return { success: false, message: `Product not found: ${firstItem.productId}` };
+              }
+              const sizeObj = product.sizes.find((s) => s.name === firstItem.size);
+              if (!sizeObj) {
+                return {
+                  success: false,
+                  message: `Size "${firstItem.size}" not found for product ${product.name}`,
+                };
+              }
+
+              // Restore old qty first
+              sizeObj.stock += oldQty;
+
+              // Check availability for new qty
+              if (sizeObj.stock < newQty) {
+                // Rollback
+                sizeObj.stock -= oldQty;
+                return {
+                  success: false,
+                  message: `Insufficient stock for ${product.name} - ${firstItem.size}. Available: ${sizeObj.stock}`,
+                };
+              }
+
+              // Deduct new qty
+              sizeObj.stock -= newQty;
+              await product.save();
+            }
+          }
+
+          order.quantity = newQty;
+          if (order.items?.[0]) {
+            order.items[0].quantity = newQty;
+          }
+
+          historyEntries.push({
+            field: "quantity",
+            oldValue: oldQty,
+            newValue: newQty,
+            updatedBy: adminName,
+            updatedById: adminId,
+            notes: updates.notes || "",
+          });
+        }
+      }
+
+      // ─── Unit Price Override ────────────────────────────────────────────
+      // Only applies to company-product orders with items[]
+      if (
+        updates.unitPrice !== undefined &&
+        updates.unitPrice !== null &&
+        updates.unitPrice !== "" &&
+        !order.isProvided &&
+        order.items?.[0]?.productId
+      ) {
+        const newUnitPrice = Number(updates.unitPrice);
+        if (isNaN(newUnitPrice) || newUnitPrice < 0) {
+          return { success: false, message: "Invalid unit price" };
+        }
+
+        const firstItem = order.items[0];
+        const currentUnitPrice =
+          firstItem.estimatedTotal && firstItem.quantity
+            ? firstItem.estimatedTotal / firstItem.quantity
+            : 0;
+
+        if (newUnitPrice !== currentUnitPrice) {
+          firstItem.estimatedTotal = newUnitPrice * firstItem.quantity;
+
+          historyEntries.push({
+            field: "unitPrice",
+            oldValue: Number(currentUnitPrice.toFixed(2)),
+            newValue: newUnitPrice,
+            updatedBy: adminName,
+            updatedById: adminId,
+            notes: updates.notes || "",
+          });
+        }
+      }
+
+      // ─── Design Fee ─────────────────────────────────────────────────────
+      if (updates.designFee !== undefined && updates.designFee !== null) {
+        const newDesignFee = Number(updates.designFee);
+        if (isNaN(newDesignFee) || newDesignFee < 0) {
+          return { success: false, message: "Invalid design fee" };
+        }
+        if (newDesignFee !== order.designFee) {
+          historyEntries.push({
+            field: "designFee",
+            oldValue: order.designFee,
+            newValue: newDesignFee,
+            updatedBy: adminName,
+            updatedById: adminId,
+            notes: updates.notes || "",
+          });
+          order.designFee = newDesignFee;
+        }
+      }
+
+      // ─── Delivery Method ────────────────────────────────────────────────
+      if (updates.deliveryMethod !== undefined && updates.deliveryMethod !== null) {
+        const validMethods = ["Pick-up", "Delivery"];
+        if (!validMethods.includes(updates.deliveryMethod)) {
+          return { success: false, message: "Invalid delivery method" };
+        }
+        if (updates.deliveryMethod !== order.receivingMode) {
+          historyEntries.push({
+            field: "deliveryMethod",
+            oldValue: order.receivingMode,
+            newValue: updates.deliveryMethod,
+            updatedBy: adminName,
+            updatedById: adminId,
+            notes: updates.notes || "",
+          });
+          order.receivingMode = updates.deliveryMethod;
+          order.deliveryMethod = updates.deliveryMethod;
+        }
+      }
+
+      // ─── Shipping Fee ───────────────────────────────────────────────────
+      if (updates.shippingFee !== undefined && updates.shippingFee !== null) {
+        const newShipping = Number(updates.shippingFee);
+        if (isNaN(newShipping) || newShipping < 0) {
+          return { success: false, message: "Invalid shipping fee" };
+        }
+        if (newShipping !== order.shippingFee) {
+          historyEntries.push({
+            field: "shippingFee",
+            oldValue: order.shippingFee,
+            newValue: newShipping,
+            updatedBy: adminName,
+            updatedById: adminId,
+            notes: updates.notes || "",
+          });
+          order.shippingFee = newShipping;
+        }
+      } else if (updates.deliveryMethod === "Pick-up" && order.shippingFee !== 0) {
+        historyEntries.push({
+          field: "shippingFee",
+          oldValue: order.shippingFee,
+          newValue: 0,
+          updatedBy: adminName,
+          updatedById: adminId,
+          notes: "Auto-zeroed for Pick-up",
+        });
+        order.shippingFee = 0;
+      }
+
+      // ─── Recompute totals ───────────────────────────────────────────────
+      let productSubtotal = 0;
+      if (!order.isProvided && order.items?.length) {
+        productSubtotal = order.items.reduce(
+          (sum, it) => sum + (it.estimatedTotal || 0),
+          0,
+        );
+      }
+
+      const designFee = order.designFee || 0;
+      const shippingFee = order.shippingFee || 0;
+      const newAmount = productSubtotal + designFee + shippingFee;
+
+      if (newAmount !== order.amount) {
+        historyEntries.push({
+          field: "amount",
+          oldValue: order.amount,
+          newValue: newAmount,
+          updatedBy: adminName,
+          updatedById: adminId,
+          notes: "Recalculated after negotiation",
+        });
+        order.amount = newAmount;
+        order.totalAmount = newAmount;
+      }
+
+      // ─── Persist + history ──────────────────────────────────────────────
+      if (historyEntries.length > 0) {
+        order.negotiationStatus = "in_progress";
+        order.pricingHistory.push(...historyEntries);
+        order.updatedAt = new Date();
+        order.updatedBy = adminName;
+
+        order.statusHistory.push({
+          status: "Pending",
+          timestamp: new Date(),
+          notes: `Pricing negotiated: ${historyEntries
+            .map((h) => `${h.field} ${h.oldValue}→${h.newValue}`)
+            .join(", ")}`,
+          updatedBy: adminName,
+        });
+
+        await order.save();
+      }
+
+      // Include computed subtotal for frontend convenience
+      const responseData = order.toObject();
+      responseData.productSubtotal = productSubtotal;
+
+      return {
+        success: true,
+        message:
+          historyEntries.length > 0
+            ? `Order updated with ${historyEntries.length} change(s)`
+            : "No changes to apply",
+        data: responseData,
+        changes: historyEntries,
+        oldSnapshot,
+      };
+    } catch (error) {
+      console.error("Error in negotiateOrder:", error);
+      throw error;
+    }
+  }
+
+    async confirmWithDownpayment(orderId, payload, admin) {
+    try {
+      const {
+        amountPaid,
+        method,
+        referenceNumber,
+        proofUrl,
+        isFullPayment = false,
+        paymentRequestMessageId = null,
+      } = payload || {};
+
+      const order = await Order.findOne({ orderId });
+      if (!order) return { success: false, message: 'Order not found' };
+
+      // Guards
+      if (order.status !== 'Pending') {
+        return { success: false, message: `Cannot confirm — order status is "${order.status}"` };
+      }
+      if (order.paymentStatus !== 'Unpaid') {
+        return { success: false, message: `Payment already recorded (${order.paymentStatus})` };
+      }
+
+      const amount = Number(amountPaid);
+      if (!amount || amount <= 0) {
+        return { success: false, message: 'amountPaid must be greater than 0' };
+      }
+
+      const total = order.amount || order.totalAmount || 0;
+      if (amount > total) {
+        return { success: false, message: `amountPaid (₱${amount}) exceeds order total (₱${total})` };
+      }
+
+      const adminName = admin?.firstName
+        ? `${admin.firstName} ${admin.lastName}`
+        : admin?.email || 'Admin';
+
+      // Record the payment
+      order.partialPayments = order.partialPayments || [];
+      order.partialPayments.push({
+        amount,
+        referenceNumber: referenceNumber || '',
+        date: new Date(),
+        updatedBy: adminName,
+      });
+
+      // Determine new payment status
+      const totalPaid = order.partialPayments.reduce((s, p) => s + (p.amount || 0), 0);
+      const fullyPaid = isFullPayment || totalPaid >= total;
+      order.paymentStatus = fullyPaid ? 'Paid' : 'Partial';
+
+      // Confirm the order
+      order.status = 'Confirmed';
+      order.negotiationStatus = 'finalized';
+      order.updatedAt = new Date();
+      order.updatedBy = adminName;
+
+      order.statusHistory.push({
+        status: 'Confirmed',
+        timestamp: new Date(),
+        notes: `${fullyPaid ? 'Full payment' : 'Downpayment'} verified — ₱${amount.toLocaleString()} via ${method || 'N/A'}${referenceNumber ? ` (ref: ${referenceNumber})` : ''}`,
+        updatedBy: adminName,
+      });
+
+      // Clear active payment request
+      order.activePaymentRequestMessageId = null;
+
+      await order.save();
+
+      // Mark linked payment-request message as verified
+      if (paymentRequestMessageId) {
+        await Message.updateOne(
+          { messageId: paymentRequestMessageId },
+          {
+            $set: {
+              'paymentRequestData.status': 'verified',
+              'paymentRequestData.statusUpdatedAt': new Date(),
+              'paymentRequestData.statusUpdatedBy': adminName,
+            },
+          }
+        );
+      }
+
+      return {
+        success: true,
+        message: fullyPaid ? 'Order confirmed — full payment recorded' : 'Order confirmed — downpayment recorded',
+        data: order,
+      };
+    } catch (error) {
+      console.error('Error in confirmWithDownpayment:', error);
       throw error;
     }
   }
@@ -978,81 +1314,77 @@ class OrderService {
     }
   }
 
-// ─────────────────────────────────────────
-// UPDATE PAYMENT STATUS
-// ─────────────────────────────────────────
-async updatePaymentStatus(orderId, paymentStatus, amountPaid = null, user = null, partialPayments = null) {
-  try {
-    const validStatuses = ["Paid", "Partial", "Unpaid"];
-    if (!validStatuses.includes(paymentStatus)) {
-      return { success: false, message: "Invalid payment status" };
-    }
+  // ─────────────────────────────────────────
+  // UPDATE PAYMENT STATUS
+  // ─────────────────────────────────────────
+  async updatePaymentStatus(orderId, paymentStatus, amountPaid = null, user = null, partialPayments = null) {
+    try {
+      const validStatuses = ["Paid", "Partial", "Unpaid"];
+      if (!validStatuses.includes(paymentStatus)) {
+        return { success: false, message: "Invalid payment status" };
+      }
 
-    const order = await Order.findOne({ orderId });
-    if (!order) {
-      return { success: false, message: "Order not found" };
-    }
+      const order = await Order.findOne({ orderId });
+      if (!order) {
+        return { success: false, message: "Order not found" };
+      }
 
-    // If partialPayments array is provided, use it directly
-    if (partialPayments !== null && Array.isArray(partialPayments)) {
-      order.partialPayments = partialPayments;
-      // Calculate total paid from the provided array
-      const totalPaid = partialPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
-      
-      // Auto-update payment status based on total paid
-      const totalAmount = order.amount || order.totalAmount || 0;
-      if (totalPaid >= totalAmount && totalAmount > 0) {
-        paymentStatus = 'Paid';
-      } else if (totalPaid > 0) {
-        paymentStatus = 'Partial';
+      if (partialPayments !== null && Array.isArray(partialPayments)) {
+        order.partialPayments = partialPayments;
+        const totalPaid = partialPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+
+        const totalAmount = order.amount || order.totalAmount || 0;
+        if (totalPaid >= totalAmount && totalAmount > 0) {
+          paymentStatus = 'Paid';
+        } else if (totalPaid > 0) {
+          paymentStatus = 'Partial';
+        } else {
+          paymentStatus = 'Unpaid';
+        }
       } else {
-        paymentStatus = 'Unpaid';
-      }
-    } else {
-      // Original logic for single payment update
-      if (paymentStatus === "Partial" && (amountPaid === null || amountPaid === undefined)) {
-        return { success: false, message: "amountPaid is required when marking payment as Partial" };
-      }
-      if (paymentStatus === "Partial" && Number(amountPaid) <= 0) {
-        return { success: false, message: "amountPaid must be greater than 0" };
-      }
-      if (paymentStatus === "Partial" && Number(amountPaid) >= Number(order.amount)) {
-        return { success: false, message: "amountPaid must be less than the order total for a Partial payment. Use 'Paid' instead." };
+        if (paymentStatus === "Partial" && (amountPaid === null || amountPaid === undefined)) {
+          return { success: false, message: "amountPaid is required when marking payment as Partial" };
+        }
+        if (paymentStatus === "Partial" && Number(amountPaid) <= 0) {
+          return { success: false, message: "amountPaid must be greater than 0" };
+        }
+        if (paymentStatus === "Partial" && Number(amountPaid) >= Number(order.amount)) {
+          return { success: false, message: "amountPaid must be less than the order total for a Partial payment. Use 'Paid' instead." };
+        }
+
+        if (paymentStatus === "Partial" && amountPaid) {
+          order.partialPayments = order.partialPayments || [];
+          order.partialPayments.push({
+            amount: amountPaid,
+            date: new Date(),
+            updatedBy: user ? (user._id?.toString() || user.email || 'Admin') : 'Admin',
+          });
+        }
       }
 
-      if (paymentStatus === "Partial" && amountPaid) {
-        order.partialPayments = order.partialPayments || [];
-        order.partialPayments.push({
-          amount: amountPaid,
-          date: new Date(),
-          updatedBy: user ? (user._id?.toString() || user.email || 'Admin') : 'Admin',
-        });
+      const oldPaymentStatus = order.paymentStatus;
+      order.paymentStatus = paymentStatus;
+
+      if (paymentStatus === "Paid") {
+        order.paymentDetails = order.paymentDetails || {};
+        order.paymentDetails.paidAt = new Date();
       }
+
+      order.updatedAt = new Date();
+      if (user) order.updatedBy = user._id?.toString() || user.email || 'Admin';
+
+      await order.save();
+
+      return {
+        success: true,
+        message: `Payment status updated from ${oldPaymentStatus} to ${paymentStatus}`,
+        data: order,
+      };
+    } catch (error) {
+      console.error("Error updating payment status:", error);
+      throw error;
     }
-
-    const oldPaymentStatus = order.paymentStatus;
-    order.paymentStatus = paymentStatus;
-
-    if (paymentStatus === "Paid") {
-      order.paymentDetails = order.paymentDetails || {};
-      order.paymentDetails.paidAt = new Date();
-    }
-
-    order.updatedAt = new Date();
-    if (user) order.updatedBy = user._id?.toString() || user.email || 'Admin';
-
-    await order.save();
-
-    return {
-      success: true,
-      message: `Payment status updated from ${oldPaymentStatus} to ${paymentStatus}`,
-      data: order,
-    };
-  } catch (error) {
-    console.error("Error updating payment status:", error);
-    throw error;
   }
-}
 
   // ─────────────────────────────────────────
   // GET ORDER STATISTICS

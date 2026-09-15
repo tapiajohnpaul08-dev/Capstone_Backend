@@ -193,7 +193,9 @@ class DriverController {
             deliveryFee: 0,
             notes: order.notes || '',
             proofOfDelivery: order.proofOfDelivery || null,
-            driverId: driverId
+            driverId: driverId,
+            paymentStatus: order.paymentStatus,
+            partialPayments: order.partialPayments
         }));
         
         res.status(200).json({
@@ -248,10 +250,14 @@ updateOrderStatus = asyncTryCatch(async (req, res, next) => {
     console.log('📦 File received:', req.file ? 'Yes' : 'No');
     console.log('👤 Driver ID:', req.user.driverId);
     
-    const { orderId } = req.params;
+        const { orderId } = req.params;
     // Get status from body - with multer, it should be a string
-    let { status, notes } = req.body;
+    let { status, notes, codCollected } = req.body;
     const { driverId } = req.user;
+
+    // Normalize codCollected to boolean (FormData sends strings)
+    const codCollectedBool =
+      codCollected === true || codCollected === 'true' || codCollected === '1';
 
     // Debug: Log what we received
     console.log('📦 Status type:', typeof status);
@@ -359,34 +365,26 @@ updateOrderStatus = asyncTryCatch(async (req, res, next) => {
         role: 'driver'
     };
 
-    // Use OrderService.updateOrderStatus
+    // Pass codCollected through so OrderService decides whether to auto-Paid
     const response = await OrderService.updateOrderStatus(
         order.orderId,
         'Completed',
         notes || 'Order marked as completed by driver',
         null,
         driverId,
-        user
+        user,
+        { codCollected: codCollectedBool }   // ← NEW
     );
 
     if (!response.success) {
         return res.status(400).json(response);
     }
 
-    // ✅ Store proof in statusHistory
-    if (proofImageUrl) {
-        // Find the most recent status history entry for this order
-        if (order.statusHistory && order.statusHistory.length > 0) {
-            // Update the last status history entry with proof
-            const lastHistory = order.statusHistory[order.statusHistory.length - 1];
-            if (lastHistory) {
-                lastHistory.proof = proofImageUrl;
-            }
-        }
-        
-        // Also save proofOfDelivery on the order for easy access
-        order.proofOfDelivery = proofImageUrl;
-        await order.save();
+         if (proofImageUrl) {
+        await Order.updateOne(
+            { orderId: order.orderId },
+            { $set: { proofOfDelivery: proofImageUrl } }
+        );
     }
 
     // Format response for frontend

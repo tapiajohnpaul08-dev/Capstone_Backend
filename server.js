@@ -231,7 +231,7 @@ io.on('connection', (socket) => {
       socket.emit('message-sent', message);
     }
   });
-  
+
   socket.on('typing', ({ conversationId, isTyping }) => {
     if (!conversationId) return;
     socketService.handleTyping(

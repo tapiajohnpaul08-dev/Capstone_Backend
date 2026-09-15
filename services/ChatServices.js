@@ -1,5 +1,8 @@
 const Conversation = require('../models/Conversation.Model');
 const Message = require('../models/Message.Model');
+const Order = require('../models/Order.Model');
+const PaymentOptionsService = require('./PaymentOptionsService');
+
 const generateId = require('../utils/generateId');
 const { getPublicId } = require('../config/multer');
 
@@ -226,6 +229,261 @@ async sendMessage(conversationId, senderId, senderName, senderType, content, att
 
 
   // ─────────────────────────────────────────
+  // SEND QUOTE (admin → customer)
+  //
+  // Called by the admin when they want to send a negotiated price quote
+  // to the customer. Creates a message with contentType 'quote' and
+  // quoteData payload. Also updates the linked order's negotiationStatus.
+  // ─────────────────────────────────────────
+  async sendQuote(conversationId, adminId, adminName, quotePayload) {
+    try {
+      const conversation = await Conversation.findOne({ conversationId });
+      if (!conversation) {
+        return { success: false, message: 'Conversation not found' };
+      }
+
+      const order = await Order.findOne({ orderId: quotePayload.orderId });
+      if (!order) {
+        return { success: false, message: 'Order not found' };
+      }
+
+      // Optional guard: only allow quotes on Pending + Unpaid orders
+      if (order.status !== 'Pending' || order.paymentStatus !== 'Unpaid') {
+        return {
+          success: false,
+          message: `Cannot quote an order with status "${order.status}" and payment "${order.paymentStatus}"`,
+        };
+      }
+
+      // ── Mark any previously-pending quote in this conversation as superseded
+      await Message.updateMany(
+        {
+          conversationId,
+          contentType: 'quote',
+          'quoteData.orderId': quotePayload.orderId,
+          'quoteData.status': 'pending',
+        },
+        { $set: { 'quoteData.status': 'superseded' } }
+      );
+
+      // ── Snapshot the current order state into the quote
+      const quoteData = {
+        orderId: order.orderId,
+        customerName: order.customerName || 'Customer',
+        quantity: order.quantity,
+        unitPrice: this._computeUnitPrice(order),
+        designFee: order.designFee || 0,
+        shippingFee: order.shippingFee || 0,
+        deliveryMethod: order.receivingMode || 'Pick-up',
+        totalAmount: order.amount || order.totalAmount || 0,
+        status: 'pending',
+        respondedAt: null,
+        respondedBy: '',
+        notes: quotePayload.notes || '',
+      };
+
+      const message = new Message({
+        messageId: await generateId('MSG'),
+        conversationId,
+        senderType: 'admin',
+        senderId: adminId,
+        senderName: adminName,
+        content: quotePayload.notes || `Quote for order ${order.orderId}`,
+        contentType: 'quote',
+        quoteData,
+        isDeleted: false,
+        createdAt: new Date(),
+      });
+
+      await message.save();
+
+      // ── Update conversation preview
+      conversation.lastMessage = `📋 Quote: ₱${quoteData.totalAmount.toLocaleString()}`;
+      conversation.lastMessageAt = new Date();
+      conversation.lastMessageBy = 'admin';
+      conversation.customerUnreadCount += 1;
+      conversation.adminUnreadCount = 0;
+      await conversation.save();
+
+      // ── Mark order as "in negotiation"
+      if (order.negotiationStatus !== 'in_progress') {
+        order.negotiationStatus = 'in_progress';
+        await order.save();
+      }
+
+      return {
+        success: true,
+        message: 'Quote sent successfully',
+        data: message,
+        order: order,
+      };
+    } catch (error) {
+      console.error('Error in sendQuote:', error);
+      throw error;
+    }
+  }
+
+  // ─────────────────────────────────────────
+  // RESPOND TO QUOTE (customer → admin)
+  //
+  // Customer accepts or rejects the quote. On accept, the order moves to
+  // Confirmed + Partial (downpayment still owed) and the accepted quote
+  // is snapshotted onto the order.
+  // ─────────────────────────────────────────
+  async respondToQuote(messageId, customerId, customerName, response, reason = '') {
+    try {
+      const validResponses = ['accepted', 'rejected'];
+      if (!validResponses.includes(response)) {
+        return { success: false, message: 'Invalid response' };
+      }
+
+      const message = await Message.findOne({ messageId });
+      if (!message) {
+        return { success: false, message: 'Quote not found' };
+      }
+
+      if (message.contentType !== 'quote') {
+        return { success: false, message: 'Message is not a quote' };
+      }
+
+      if (message.quoteData?.status !== 'pending') {
+        return {
+          success: false,
+          message: `Quote already ${message.quoteData?.status || 'responded'}`,
+        };
+      }
+
+      const order = await Order.findOne({ orderId: message.quoteData.orderId });
+      if (!order) {
+        return { success: false, message: 'Linked order not found' };
+      }
+
+      // ── Update quote status on the message
+      message.quoteData.status = response;
+      message.quoteData.respondedAt = new Date();
+      message.quoteData.respondedBy = customerName;
+      if (reason) message.quoteData.notes = reason;
+      await message.save();
+
+      // ── System message into the chat
+      const systemMessage = new Message({
+        messageId: await generateId('MSG'),
+        conversationId: message.conversationId,
+        senderType: 'customer',
+        senderId: customerId,
+        senderName: customerName,
+        content:
+          response === 'accepted'
+            ? `✅ Accepted the quote for ${order.orderId}`
+            : `❌ Rejected the quote for ${order.orderId}${reason ? `: ${reason}` : ''}`,
+        contentType: 'system',
+        isDeleted: false,
+        createdAt: new Date(),
+      });
+      await systemMessage.save();
+
+      // ── On accept → Confirm order
+      if (response === 'accepted') {
+        order.status = 'Confirmed';
+        order.negotiationStatus = 'finalized';
+        order.paymentStatus = 'Partial'; // downpayment still owed, but order is locked
+        order.acceptedQuote = {
+          messageId: message.messageId,
+          acceptedAt: new Date(),
+          acceptedBy: customerName,
+          snapshot: {
+            quantity: message.quoteData.quantity,
+            designFee: message.quoteData.designFee,
+            shippingFee: message.quoteData.shippingFee,
+            deliveryMethod: message.quoteData.deliveryMethod,
+            totalAmount: message.quoteData.totalAmount,
+          },
+        };
+        order.statusHistory.push({
+          status: 'Confirmed',
+          timestamp: new Date(),
+          notes: `Customer accepted quote ${message.messageId} via chat. Downpayment still owed.`,
+          updatedBy: customerName,
+        });
+        order.updatedAt = new Date();
+        await order.save();
+      }
+
+      // ── Update conversation preview
+      const conversation = await Conversation.findOne({
+        conversationId: message.conversationId,
+      });
+      if (conversation) {
+        conversation.lastMessage =
+          response === 'accepted'
+            ? `✅ Accepted quote (${order.orderId})`
+            : `❌ Rejected quote (${order.orderId})`;
+        conversation.lastMessageAt = new Date();
+        conversation.lastMessageBy = 'customer';
+        conversation.adminUnreadCount += 1;
+        conversation.customerUnreadCount = 0;
+        await conversation.save();
+      }
+
+      return {
+        success: true,
+        message: `Quote ${response}`,
+        data: { message, order, systemMessage },
+      };
+    } catch (error) {
+      console.error('Error in respondToQuote:', error);
+      throw error;
+    }
+  }
+
+
+    // ─────────────────────────────────────────
+  // LINK ORDER TO CONVERSATION
+  // ─────────────────────────────────────────
+  async linkOrderToConversation(conversationId, orderId, customerId) {
+    try {
+      const conversation = await Conversation.findOne({ conversationId });
+      if (!conversation) {
+        return { success: false, message: 'Conversation not found' };
+      }
+
+      // Only the owning customer can link
+      if (conversation.customerId !== customerId) {
+        return { success: false, message: 'Access denied' };
+      }
+
+      // Verify the order belongs to this customer and is negotiable
+      const order = await Order.findOne({ orderId });
+      if (!order) {
+        return { success: false, message: 'Order not found' };
+      }
+      if (order.orderedBy !== customerId && order.customerEmail !== conversation.customerEmail) {
+        return { success: false, message: 'Order does not belong to this customer' };
+      }
+
+      conversation.orderId = orderId;
+      conversation.updatedAt = new Date();
+      await conversation.save();
+
+      return { success: true, message: 'Order linked to conversation', data: conversation };
+    } catch (error) {
+      console.error('Error linking order:', error);
+      throw error;
+    }
+  }
+
+  // ─────────────────────────────────────────
+  // HELPER: derive unit price from order items
+  // ─────────────────────────────────────────
+  _computeUnitPrice(order) {
+    if (!order.items || order.items.length === 0) return 0;
+    const first = order.items[0];
+    if (!first.estimatedTotal || !first.quantity) return 0;
+    return first.estimatedTotal / first.quantity;
+  }
+
+
+  // ─────────────────────────────────────────
   // UNSEND MESSAGE
   // ─────────────────────────────────────────
   async unsendMessage(messageId, userId, userType) {
@@ -399,6 +657,267 @@ async sendMessage(conversationId, senderId, senderName, senderType, content, att
       };
     } catch (error) {
       console.error('Error getting conversation:', error);
+      throw error;
+    }
+  }
+
+    // ─────────────────────────────────────────
+  // SEND PAYMENT REQUEST (admin → customer)
+  //
+  // Creates a payment-request message containing the GCash / bank details
+  // pulled from env vars. Attaches it to the linked order so we can
+  // prevent multiple concurrent requests.
+  // ─────────────────────────────────────────
+  async sendPaymentRequest(conversationId, admin, payload) {
+    try {
+      const { orderId, method, amountDue, notes } = payload;
+
+      if (!orderId) return { success: false, message: 'orderId is required' };
+      if (!['gcash', 'bank_transfer'].includes(method)) {
+        return { success: false, message: 'Invalid payment method' };
+      }
+      if (!amountDue || Number(amountDue) <= 0) {
+        return { success: false, message: 'amountDue must be greater than 0' };
+      }
+
+      const conversation = await Conversation.findOne({ conversationId });
+      if (!conversation) return { success: false, message: 'Conversation not found' };
+
+      const order = await Order.findOne({ orderId });
+      if (!order) return { success: false, message: 'Order not found' };
+
+      if (order.status !== 'Pending') {
+        return { success: false, message: `Cannot request payment — order status is "${order.status}"` };
+      }
+      if (order.paymentStatus !== 'Unpaid') {
+        return { success: false, message: `Cannot request payment — payment status is "${order.paymentStatus}"` };
+      }
+      if (order.activePaymentRequestMessageId) {
+        return { success: false, message: 'A payment request is already active for this order' };
+      }
+
+      // Resolve account details from env
+      const account = PaymentOptionsService.resolveAccountFor(method);
+      if (!account || !account.accountName || !account.accountNumber) {
+        return { success: false, message: 'Payment account not configured. Contact system admin.' };
+      }
+
+      const total = order.amount || order.totalAmount || 0;
+      const amount = Number(amountDue);
+      if (amount > total) {
+        return { success: false, message: `Amount (₱${amount}) cannot exceed order total (₱${total})` };
+      }
+
+      const adminName = admin?.firstName
+        ? `${admin.firstName} ${admin.lastName}`
+        : admin?.email || 'Admin';
+
+      // Supersede any prior pending payment-request in this conversation
+      await Message.updateMany(
+        {
+          conversationId,
+          contentType: 'payment-request',
+          'paymentRequestData.orderId': orderId,
+          'paymentRequestData.status': { $in: ['pending', 'proof-submitted'] },
+        },
+        { $set: { 'paymentRequestData.status': 'superseded' } }
+      );
+
+      const message = new Message({
+        messageId: await generateId('MSG'),
+        conversationId,
+        senderType: 'admin',
+        senderId: admin?.adminId || 'ADMIN',
+        senderName: adminName,
+        content: `Payment request for order ${orderId} — ₱${amount.toLocaleString()}`,
+        contentType: 'payment-request',
+        paymentRequestData: {
+          orderId,
+          method,
+          accountName: account.accountName,
+          accountNumber: account.accountNumber,
+          bankName: account.bankName,
+          amountDue: amount,
+          notes: notes || '',
+          status: 'pending',
+          statusUpdatedAt: new Date(),
+          statusUpdatedBy: adminName,
+        },
+        isDeleted: false,
+        createdAt: new Date(),
+      });
+      await message.save();
+
+      // Track as active on the order
+      order.activePaymentRequestMessageId = message.messageId;
+      order.updatedAt = new Date();
+      order.updatedBy = adminName;
+      await order.save();
+
+      // Update conversation preview
+      conversation.lastMessage = `💳 Payment request: ₱${amount.toLocaleString()}`;
+      conversation.lastMessageAt = new Date();
+      conversation.lastMessageBy = 'admin';
+      conversation.customerUnreadCount += 1;
+      conversation.adminUnreadCount = 0;
+      await conversation.save();
+
+      return { success: true, data: message, order };
+    } catch (error) {
+      console.error('Error in sendPaymentRequest:', error);
+      throw error;
+    }
+  }
+
+  // ─────────────────────────────────────────
+  // SEND PAYMENT PROOF (customer → admin)
+  //
+  // Customer submits proof of payment. Only one proof per request allowed.
+  // ─────────────────────────────────────────
+  async sendPaymentProof(conversationId, customer, payload) {
+    try {
+      const {
+        paymentRequestMessageId,
+        amountPaid,
+        referenceNumber,
+        proofImageUrl,
+        note,
+      } = payload;
+
+      if (!paymentRequestMessageId) return { success: false, message: 'paymentRequestMessageId is required' };
+      if (!proofImageUrl) return { success: false, message: 'proofImageUrl is required' };
+
+      const requestMsg = await Message.findOne({ messageId: paymentRequestMessageId });
+      if (!requestMsg || requestMsg.contentType !== 'payment-request') {
+        return { success: false, message: 'Payment request not found' };
+      }
+      if (requestMsg.paymentRequestData.status !== 'pending') {
+        return { success: false, message: `This request is already "${requestMsg.paymentRequestData.status}"` };
+      }
+
+      const orderId = requestMsg.paymentRequestData.orderId;
+      const order = await Order.findOne({ orderId });
+      if (!order) return { success: false, message: 'Order not found' };
+      if (order.status !== 'Pending') {
+        return { success: false, message: `Order is no longer Pending (status: ${order.status})` };
+      }
+
+      const customerName = customer?.firstName
+        ? `${customer.firstName} ${customer.lastName}`
+        : customer?.email || 'Customer';
+
+      // Enforce: customer cannot alter the amountDue
+      const finalAmount = requestMsg.paymentRequestData.amountDue;
+
+      const proofMsg = new Message({
+        messageId: await generateId('MSG'),
+        conversationId,
+        senderType: 'customer',
+        senderId: customer?.customerId || 'CUST',
+        senderName: customerName,
+        content: `Payment proof submitted — ₱${finalAmount.toLocaleString()}`,
+        contentType: 'payment-proof',
+        paymentProofData: {
+          paymentRequestMessageId,
+          orderId,
+          method: requestMsg.paymentRequestData.method,
+          amountPaid: finalAmount,
+          referenceNumber: referenceNumber || '',
+          proofImageUrl,
+          note: note || '',
+          submittedAt: new Date(),
+          status: 'pending-review',
+        },
+        isDeleted: false,
+        createdAt: new Date(),
+      });
+      await proofMsg.save();
+
+      // Update the request message
+      requestMsg.paymentRequestData.status = 'proof-submitted';
+      requestMsg.paymentRequestData.statusUpdatedAt = new Date();
+      requestMsg.paymentRequestData.statusUpdatedBy = customerName;
+      await requestMsg.save();
+
+      // Update conversation preview
+      const conversation = await Conversation.findOne({ conversationId });
+      if (conversation) {
+        conversation.lastMessage = `📎 Payment proof — ₱${finalAmount.toLocaleString()}`;
+        conversation.lastMessageAt = new Date();
+        conversation.lastMessageBy = 'customer';
+        conversation.adminUnreadCount += 1;
+        conversation.customerUnreadCount = 0;
+        if (['resolved', 'closed'].includes(conversation.status)) {
+          conversation.status = 'open';
+        }
+        await conversation.save();
+      }
+
+      return { success: true, data: proofMsg, requestMessage: requestMsg };
+    } catch (error) {
+      console.error('Error in sendPaymentProof:', error);
+      throw error;
+    }
+  }
+
+  // ─────────────────────────────────────────
+  // REJECT PAYMENT PROOF (admin)
+  // ─────────────────────────────────────────
+  async rejectPaymentProof(proofMessageId, admin, reason = '') {
+    try {
+      const proofMsg = await Message.findOne({ messageId: proofMessageId });
+      if (!proofMsg || proofMsg.contentType !== 'payment-proof') {
+        return { success: false, message: 'Payment proof not found' };
+      }
+      if (proofMsg.paymentProofData.status !== 'pending-review') {
+        return { success: false, message: `Proof already ${proofMsg.paymentProofData.status}` };
+      }
+
+      const adminName = admin?.firstName
+        ? `${admin.firstName} ${admin.lastName}`
+        : admin?.email || 'Admin';
+
+      proofMsg.paymentProofData.status = 'rejected';
+      proofMsg.paymentProofData.reviewedAt = new Date();
+      proofMsg.paymentProofData.reviewedBy = adminName;
+      proofMsg.paymentProofData.rejectionReason = reason || 'No reason provided';
+      await proofMsg.save();
+
+      // Reopen the request so customer can resubmit
+      const requestMsg = await Message.findOne({
+        messageId: proofMsg.paymentProofData.paymentRequestMessageId,
+      });
+      if (requestMsg) {
+        requestMsg.paymentRequestData.status = 'rejected';
+        requestMsg.paymentRequestData.rejectionReason = reason || 'No reason provided';
+        requestMsg.paymentRequestData.statusUpdatedAt = new Date();
+        requestMsg.paymentRequestData.statusUpdatedBy = adminName;
+        await requestMsg.save();
+      }
+
+      // Create a system message explaining the rejection in-chat
+      const systemMsg = new Message({
+        messageId: await generateId('MSG'),
+        conversationId: proofMsg.conversationId,
+        senderType: 'admin',
+        senderId: admin?.adminId || 'ADMIN',
+        senderName: adminName,
+        content: `❌ Payment proof rejected${reason ? `: ${reason}` : ''}. Please re-submit or contact support.`,
+        contentType: 'system',
+        isDeleted: false,
+        createdAt: new Date(),
+      });
+      await systemMsg.save();
+
+      // Clear the active flag on the order so a new request can be sent
+      await Order.updateOne(
+        { orderId: proofMsg.paymentProofData.orderId },
+        { $set: { activePaymentRequestMessageId: null } }
+      );
+
+      return { success: true, data: proofMsg, requestMessage: requestMsg, systemMessage: systemMsg };
+    } catch (error) {
+      console.error('Error in rejectPaymentProof:', error);
       throw error;
     }
   }

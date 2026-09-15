@@ -15,8 +15,10 @@ router.get('/customer/unread-count', verifyCustomerToken, ChatController.getCust
 router.patch('/customer/conversations/:conversationId/status', verifyCustomerToken, ChatController.updateStatus);
 router.delete('/customer/messages/:messageId', verifyCustomerToken, ChatController.unsendMessage);
 
+router.patch('/customer/conversations/:conversationId/link-order', verifyCustomerToken, ChatController.linkOrder);
+router.post('/customer/payment-proof', verifyCustomerToken, ChatController.sendPaymentProof);
 // ─────────────────────────────────────────
-// ADMIN ROUTES 
+// ADMIN ROUTES
 // ─────────────────────────────────────────
 router.get('/admin/conversations', verifyAdminToken, ChatController.getAdminConversations);
 router.get('/admin/conversations/:conversationId/messages', verifyAdminToken, ChatController.getMessages);
@@ -25,18 +27,17 @@ router.get('/admin/unread-count', verifyAdminToken, ChatController.getAdminUnrea
 router.patch('/admin/conversations/:conversationId/assign', verifyAdminToken, ChatController.assignConversation);
 router.patch('/admin/conversations/:conversationId/status', verifyAdminToken, ChatController.updateStatus);
 router.delete('/admin/messages/:messageId', verifyAdminToken, ChatController.unsendMessage);
+router.get('/admin/payment-options', verifyAdminToken, ChatController.getPaymentOptions);
+router.post('/admin/payment-request', verifyAdminToken, ChatController.sendPaymentRequest);
+router.post('/admin/payment-proof/:messageId/reject', verifyAdminToken, ChatController.rejectPaymentProof);
+router.post('/admin/payment-proof/:messageId/verify', verifyAdminToken, ChatController.verifyPaymentProof);
 
-// ✅ FIXED: File upload endpoint for customer - with better error handling
+// ─────────────────────────────────────────
+// FILE UPLOAD (customer)
+// ─────────────────────────────────────────
 router.post('/customer/upload', verifyCustomerToken, (req, res, next) => {
-  // Use chatUpload middleware with error handling
   chatUpload.array('files', 5)(req, res, (err) => {
-    if (err) {
-      console.error('Upload error:', err);
-      return res.status(400).json({ 
-        success: false, 
-        message: err.message || 'File upload failed' 
-      });
-    }
+    if (err) return res.status(400).json({ success: false, message: err.message || 'File upload failed' });
     next();
   });
 }, async (req, res) => {
@@ -44,39 +45,26 @@ router.post('/customer/upload', verifyCustomerToken, (req, res, next) => {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ success: false, message: 'No files uploaded' });
     }
-    
-    const files = req.files.map(file => {
-      // Cloudinary stores the URL in file.path
-      const fileData = {
-        name: file.originalname,
-        size: file.size,
-        type: file.mimetype,
-        path: file.path || file.url,
-        url: file.url || file.path,
-        public_id: file.public_id || file.filename
-      };
-      
-      console.log('📤 Customer file uploaded to Cloudinary:', fileData.path);
-      return fileData;
-    });
-    
+    const files = req.files.map(file => ({
+      name: file.originalname,
+      size: file.size,
+      type: file.mimetype,
+      path: file.path || file.url,
+      url: file.url || file.path,
+      public_id: file.public_id || file.filename
+    }));
     res.json({ success: true, files });
   } catch (error) {
-    console.error('Upload error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
 
-// ✅ FIXED: File upload endpoint for admin - with better error handling
+// ─────────────────────────────────────────
+// FILE UPLOAD (admin)
+// ─────────────────────────────────────────
 router.post('/upload', verifyAdminToken, (req, res, next) => {
   chatUpload.array('files', 5)(req, res, (err) => {
-    if (err) {
-      console.error('Upload error:', err);
-      return res.status(400).json({ 
-        success: false, 
-        message: err.message || 'File upload failed' 
-      });
-    }
+    if (err) return res.status(400).json({ success: false, message: err.message || 'File upload failed' });
     next();
   });
 }, async (req, res) => {
@@ -84,24 +72,16 @@ router.post('/upload', verifyAdminToken, (req, res, next) => {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ success: false, message: 'No files uploaded' });
     }
-    
-    const files = req.files.map(file => {
-      const fileData = {
-        name: file.originalname,
-        size: file.size,
-        type: file.mimetype,
-        path: file.path || file.url,
-        url: file.url || file.path,
-        public_id: file.public_id || file.filename
-      };
-      
-      console.log('📤 Admin file uploaded to Cloudinary:', fileData.path);
-      return fileData;
-    });
-    
+    const files = req.files.map(file => ({
+      name: file.originalname,
+      size: file.size,
+      type: file.mimetype,
+      path: file.path || file.url,
+      url: file.url || file.path,
+      public_id: file.public_id || file.filename
+    }));
     res.json({ success: true, files });
   } catch (error) {
-    console.error('Upload error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });

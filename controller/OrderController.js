@@ -3,290 +3,281 @@ const orderService = require('../services/OrderServices');
 const asyncTryCatch = require('../utils/tryAndCatch');
 
 class OrderController {
-    
+
     createOrder = asyncTryCatch(async (req, res, next) => {
-        console.log('🔵 createOrder called');
-        
         let user = null;
         let userType = null;
-        
+
         if (req.customer) {
             user = req.customer;
             userType = 'customer';
-            console.log('Customer order:', user.email);
         } else if (req.admin) {
             user = req.admin;
             userType = 'admin';
-            console.log('Admin order:', user.email);
         } else {
-            return res.status(401).json({
-                success: false,
-                message: 'Authentication required'
-            });
+            return res.status(401).json({ success: false, message: 'Authentication required' });
         }
-        
+
         const response = await orderService.createOrder(req.body, user, userType);
-        const status = response.success ? 201 : 400;
-        res.status(status).json(response);
+        res.status(response.success ? 201 : 400).json(response);
     });
 
     getMyOrders = asyncTryCatch(async (req, res, next) => {
-        console.log('🔵 getMyOrders called');
         const userId = req.customer._id.toString();
         const response = await orderService.getOrdersByOrderedBy(userId);
         res.status(200).json(response);
     });
 
     getMyOrderById = asyncTryCatch(async (req, res, next) => {
-        console.log('🔵 getMyOrderById called');
         const { orderId } = req.params;
         const userId = req.customer._id.toString();
-        
         const response = await orderService.getOrderById(orderId);
-        
-        if (!response.success) {
-            return res.status(404).json(response);
-        }
-        
+        if (!response.success) return res.status(404).json(response);
         if (response.data.orderedBy !== userId) {
-            return res.status(403).json({
-                success: false,
-                message: 'Access denied. This order does not belong to you.'
-            });
+            return res.status(403).json({ success: false, message: 'Access denied.' });
         }
-        
         res.status(200).json(response);
     });
 
     updateMyOrder = asyncTryCatch(async (req, res, next) => {
-        console.log('🔵 updateMyOrder called');
         const { orderId } = req.params;
         const userId = req.customer._id.toString();
-        
         const order = await orderService.getOrderById(orderId);
-        
-        if (!order.success) {
-            return res.status(404).json(order);
-        }
-        
+        if (!order.success) return res.status(404).json(order);
         if (order.data.orderedBy !== userId) {
-            return res.status(403).json({
-                success: false,
-                message: 'Access denied. This order does not belong to you.'
-            });
+            return res.status(403).json({ success: false, message: 'Access denied.' });
         }
-        
         if (order.data.status !== 'Pending') {
-            return res.status(400).json({
-                success: false,
-                message: `Cannot modify order in ${order.data.status} status. Only pending orders can be modified.`
-            });
+            return res.status(400).json({ success: false, message: `Cannot modify order in ${order.data.status} status.` });
         }
-        
         const response = await orderService.updateOrder(orderId, req.body, req.customer);
-        const status = response.success ? 200 : 400;
-        res.status(status).json(response);
+        res.status(response.success ? 200 : 400).json(response);
     });
 
     cancelMyOrder = asyncTryCatch(async (req, res, next) => {
-        console.log('🔵 cancelMyOrder called');
         const { orderId } = req.params;
         const userId = req.customer._id.toString();
-        
         const order = await orderService.getOrderById(orderId);
-        
-        if (!order.success) {
-            return res.status(404).json(order);
-        }
-        
+        if (!order.success) return res.status(404).json(order);
         if (order.data.orderedBy !== userId) {
-            return res.status(403).json({
-                success: false,
-                message: 'Access denied. This order does not belong to you.'
-            });
+            return res.status(403).json({ success: false, message: 'Access denied.' });
         }
-        
         const cancellableStatuses = ['Pending', 'Scheduled'];
         if (!cancellableStatuses.includes(order.data.status)) {
-            return res.status(400).json({
-                success: false,
-                message: `Cannot cancel order in ${order.data.status} status. Only pending or scheduled orders can be cancelled.`
-            });
+            return res.status(400).json({ success: false, message: `Cannot cancel order in ${order.data.status} status.` });
         }
-        
         const response = await orderService.updateOrderStatus(orderId, 'Cancelled', 'Cancelled by customer', req.customer);
-        const status = response.success ? 200 : 400;
-        res.status(status).json(response);
+        res.status(response.success ? 200 : 400).json(response);
     });
 
     getAllOrders = asyncTryCatch(async (req, res, next) => {
-        console.log('🔵 getAllOrders called');
-        const filters = req.query;
-        const response = await orderService.getAllOrders(filters);
+        const response = await orderService.getAllOrders(req.query);
         res.status(200).json(response);
     });
 
     getOrderById = asyncTryCatch(async (req, res, next) => {
-        console.log('🔵 getOrderById called');
-        const { orderId } = req.params;
-        const response = await orderService.getOrderById(orderId);
-        const status = response.success ? 200 : 404;
-        res.status(status).json(response);
+        const response = await orderService.getOrderById(req.params.orderId);
+        res.status(response.success ? 200 : 404).json(response);
     });
 
+    // ─────────────────────────────────────────
+    // UPDATE ORDER STATUS (admin)
+    // Forwards `codCollected` so OrderServices can decide whether to
+    // auto-mark Partial → Paid when the order is completed.
+    // ─────────────────────────────────────────
     updateOrderStatus = asyncTryCatch(async (req, res, next) => {
-        console.log('🔵 updateOrderStatus called');
         const { orderId } = req.params;
-        const { status, notes, productionSchedule, driverId, driverDetails } = req.body;
+        const { status, notes, productionSchedule, driverId, codCollected } = req.body;
         const user = req.admin;
-        
+
         if (!status) {
-            return res.status(400).json({
-                success: false,
-                message: 'Status is required'
-            });
+            return res.status(400).json({ success: false, message: 'Status is required' });
         }
-        
-        // Pass driverId separately, not driverDetails
+
         const response = await orderService.updateOrderStatus(
-            orderId, 
-            status, 
-            notes, 
-            productionSchedule, 
-            driverId, // This should be a string (driverId)
-            user
+            orderId,
+            status,
+            notes,
+            productionSchedule,
+            driverId,
+            user,
+            {
+                codCollected:
+                    codCollected === true ||
+                    codCollected === 'true' ||
+                    codCollected === '1',
+            }
         );
-        const statusCode = response.success ? 200 : 400;
-        res.status(statusCode).json(response);
+
+        // Emit real-time status update to the linked conversation (if any)
+        if (response.success) {
+            try {
+                const io = req.app.get('io');
+                if (io) {
+                    const Conversation = require('../models/Conversation.Model');
+                    const conv = await Conversation.findOne({ orderId });
+                    if (conv) {
+                        io.to(`conv_${conv.conversationId}`).emit('order-negotiation-updated', response.data);
+                    }
+                }
+            } catch (e) {
+                console.error('Emit order status update error:', e);
+            }
+        }
+
+        res.status(response.success ? 200 : 400).json(response);
     });
 
     updatePaymentStatus = asyncTryCatch(async (req, res, next) => {
-        console.log('🔵 updatePaymentStatus called');
-        console.log('Request body:', req.body);
         const { orderId } = req.params;
         const { paymentStatus, amountPaid, partialPayments } = req.body;
-        console.log('Updated:', req.body);
         const user = req.admin;
-        
+
         if (!paymentStatus) {
-            return res.status(400).json({
-                success: false,
-                message: 'Payment status is required'
-            });
+            return res.status(400).json({ success: false, message: 'Payment status is required' });
         }
-        
-        // Pass the partialPayments array to the service
+
         const response = await orderService.updatePaymentStatus(
-            orderId, 
-            paymentStatus, 
-            amountPaid, 
-            user, 
-            partialPayments // <-- Pass the partialPayments array
+            orderId, paymentStatus, amountPaid, user, partialPayments
         );
-        const statusCode = response.success ? 200 : 400;
-        res.status(statusCode).json(response);
+        res.status(response.success ? 200 : 400).json(response);
     });
 
     updateOrder = asyncTryCatch(async (req, res, next) => {
-        console.log('🔵 updateOrder called');
         const { orderId } = req.params;
         const user = req.admin;
         const response = await orderService.updateOrder(orderId, req.body, user);
-        const status = response.success ? 200 : 400;
-        res.status(status).json(response);
+        res.status(response.success ? 200 : 400).json(response);
     });
 
     deleteOrder = asyncTryCatch(async (req, res, next) => {
-        console.log('🔵 deleteOrder called');
-        const { orderId } = req.params;
-        const response = await orderService.deleteOrder(orderId);
-        const status = response.success ? 200 : 404;
-        res.status(status).json(response);
+        const response = await orderService.deleteOrder(req.params.orderId);
+        res.status(response.success ? 200 : 404).json(response);
     });
 
     getOrderStatistics = asyncTryCatch(async (req, res, next) => {
-        console.log('🔵 getOrderStatistics called');
         const response = await orderService.getOrderStatistics();
         res.status(200).json(response);
     });
 
     getOrdersByDateRange = asyncTryCatch(async (req, res, next) => {
-        console.log('🔵 getOrdersByDateRange called');
         const { startDate, endDate } = req.query;
-        
         if (!startDate || !endDate) {
-            return res.status(400).json({
-                success: false,
-                message: 'Start date and end date are required'
-            });
+            return res.status(400).json({ success: false, message: 'Start date and end date are required' });
         }
-        
         const response = await orderService.getOrdersByDateRange(startDate, endDate);
         res.status(200).json(response);
     });
 
     getOrdersByCustomer = asyncTryCatch(async (req, res, next) => {
-        console.log('🔵 getOrdersByCustomer called');
-        const { email } = req.params;
-        const response = await orderService.getOrdersByCustomerEmail(email);
-        const status = response.success ? 200 : 404;
-        res.status(status).json(response);
+        const response = await orderService.getOrdersByCustomerEmail(req.params.email);
+        res.status(response.success ? 200 : 404).json(response);
     });
 
     getOrderByIdShared = asyncTryCatch(async (req, res, next) => {
-        console.log('🔵 getOrderByIdShared called');
-        const { orderId } = req.params;
-        const response = await orderService.getOrderById(orderId);
-        
-        if (!response.success) {
-            return res.status(404).json(response);
-        }
-        
+        const response = await orderService.getOrderById(req.params.orderId);
+        if (!response.success) return res.status(404).json(response);
         if (req.customer && response.data.orderedBy !== req.customer._id.toString()) {
-            return res.status(403).json({
-                success: false,
-                message: 'Access denied. This order does not belong to you.'
-            });
+            return res.status(403).json({ success: false, message: 'Access denied.' });
         }
-        
         res.status(200).json(response);
     });
 
     getMyOrdersShared = asyncTryCatch(async (req, res, next) => {
-        console.log('🔵 getMyOrdersShared called');
         let customerEmail;
-        
         if (req.customer) {
             customerEmail = req.customer.email;
         } else if (req.admin) {
             customerEmail = req.query.email;
             if (!customerEmail) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Customer email is required for admin access'
-                });
+                return res.status(400).json({ success: false, message: 'Customer email is required for admin access' });
             }
         } else {
-            return res.status(401).json({
-                success: false,
-                message: 'Authentication required'
-            });
+            return res.status(401).json({ success: false, message: 'Authentication required' });
         }
-        
         const response = await orderService.getOrdersByCustomerEmail(customerEmail);
-        const status = response.success ? 200 : 404;
-        res.status(status).json(response);
+        res.status(response.success ? 200 : 404).json(response);
     });
 
     toggleReceivedStatus = asyncTryCatch(async (req, res, next) => {
-        console.log('🔵 toggleReceivedStatus called');
         const { orderId } = req.params;
         const { isReceived } = req.body;
-        const user = req.customer; // ← Use customer, not admin
-
+        const user = req.customer;
         const response = await orderService.toggleReceivedStatus(orderId, isReceived, user);
-        const status = response.success ? 200 : 400;
-        res.status(status).json(response);
+        res.status(response.success ? 200 : 400).json(response);
+    });
+
+    // ─────────────────────────────────────────
+    // NEGOTIATE ORDER — edit pricing fields during Pending status
+    // ─────────────────────────────────────────
+    negotiateOrder = asyncTryCatch(async (req, res, next) => {
+        const { orderId } = req.params;
+        const user = req.admin;
+
+        const response = await orderService.negotiateOrder(orderId, req.body, user);
+
+        if (response.success) {
+            try {
+                const io = req.app.get('io');
+                if (io) {
+                    const Conversation = require('../models/Conversation.Model');
+                    const conv = await Conversation.findOne({ orderId });
+                    if (conv) {
+                        io.to(`conv_${conv.conversationId}`).emit('order-negotiation-updated', response.data);
+                        console.log(`📤 Emitted order-negotiation-updated to conv_${conv.conversationId}`);
+                    } else {
+                        console.warn(`⚠️ No conversation found for orderId ${orderId}`);
+                    }
+                }
+            } catch (e) {
+                console.error('Emit negotiateOrder error:', e);
+            }
+        }
+
+        res.status(response.success ? 200 : 400).json(response);
+    });
+
+    // ─────────────────────────────────────────
+    // POST /order/admin/orders/:id/confirm-with-downpayment
+    // ─────────────────────────────────────────
+    confirmWithDownpayment = asyncTryCatch(async (req, res, next) => {
+        const { orderId } = req.params;
+        const { amountPaid, method, referenceNumber, proofUrl, isFullPayment, paymentRequestMessageId } = req.body;
+        const user = req.admin;
+
+        if (!amountPaid || Number(amountPaid) <= 0) {
+            return res.status(400).json({ success: false, message: 'amountPaid is required and must be > 0' });
+        }
+
+        const response = await orderService.confirmWithDownpayment(
+            orderId,
+            {
+                amountPaid: Number(amountPaid),
+                method: method || '',
+                referenceNumber: referenceNumber || '',
+                proofUrl: proofUrl || '',
+                isFullPayment: !!isFullPayment,
+                paymentRequestMessageId: paymentRequestMessageId || null,
+            },
+            user
+        );
+
+        if (response.success) {
+            try {
+                const io = req.app.get('io');
+                if (io) {
+                    const Conversation = require('../models/Conversation.Model');
+                    const conv = await Conversation.findOne({ orderId });
+                    if (conv) {
+                        io.to(`conv_${conv.conversationId}`).emit('order-negotiation-updated', response.data);
+                    }
+                }
+            } catch (e) {
+                console.error('Emit confirm error:', e);
+            }
+        }
+
+        res.status(response.success ? 200 : 400).json(response);
     });
 }
 

@@ -107,6 +107,19 @@ const partialPaymentSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const pricingHistorySchema = new mongoose.Schema(
+  {
+    field: { type: String, required: true },          // 'designFee' | 'quantity' | 'shippingFee' | 'amount' | 'deliveryMethod'
+    oldValue: { type: mongoose.Schema.Types.Mixed },
+    newValue: { type: mongoose.Schema.Types.Mixed },
+    updatedBy: { type: String },                       // admin name
+    updatedById: { type: String },                     // admin id (optional)
+    notes: { type: String, default: '' },
+    timestamp: { type: Date, default: Date.now },
+  },
+  { _id: false }
+);
+
 const orderSchema = new mongoose.Schema({
   orderId: { type: String, unique: true },
   customerName: { type: String },
@@ -147,7 +160,7 @@ const orderSchema = new mongoose.Schema({
   paymentStatus: {
     type: String,
     enum: ["Unpaid", "Partial", "Paid"],
-    default: "Partial",
+    default: "Unpaid",
   },
   paymentMethod: {
     type: String,
@@ -161,6 +174,40 @@ const orderSchema = new mongoose.Schema({
     proofOfPayment: { type: String, default: "" },
   },
   shippingFee: { type: Number, default: 0 },
+  designFee: {
+  type: Number,
+  default: 500,
+  min: 0,
+},
+
+negotiationStatus: {
+  type: String,
+  enum: ['none', 'in_progress', 'finalized'],
+  default: 'none',
+},
+
+
+pricingHistory: {
+  type: [pricingHistorySchema],
+  default: [],
+},
+
+// Optional: track what the customer has accepted
+acceptedQuote: {
+  messageId: { type: String, default: null },
+  acceptedAt: { type: Date, default: null },
+  acceptedBy: { type: String, default: '' },
+  snapshot: {
+    quantity: { type: Number },
+    designFee: { type: Number },
+    shippingFee: { type: Number },
+    deliveryMethod: { type: String },
+    totalAmount: { type: Number },
+  },
+},
+  
+  activePaymentRequestMessageId: { type: String, default: null },
+
   isReceived: { type: Boolean, default: false },
   receivingMode: { type: String, enum: ["Pick-up", "Delivery"] },
   useCourier: { type: Boolean, default: false },
@@ -177,9 +224,7 @@ const orderSchema = new mongoose.Schema({
   orderedBy: { type: String },
   orderedById: { type: String },
 
-  // FIX: `expectedDelivery` was declared twice in the original schema
-  // (once optional, once `required: true`) - a duplicate object key where
-  // the second definition silently wins in JS. Keeping a single definition.
+
   expectedDelivery: {
     type: Date,
     required: true,
