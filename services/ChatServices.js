@@ -457,7 +457,7 @@ async sendMessage(conversationId, senderId, senderName, senderType, content, att
       if (!order) {
         return { success: false, message: 'Order not found' };
       }
-      if (order.orderedBy !== customerId && order.customerEmail !== conversation.customerEmail) {
+      if (order.orderedBy !== customerId) {
         return { success: false, message: 'Order does not belong to this customer' };
       }
 
