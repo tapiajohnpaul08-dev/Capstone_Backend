@@ -223,6 +223,20 @@ class ChatController {
       io.to(`conv_${conversationId}`).emit('payment-proof-updated', response.data);
       io.to(`conv_${conversationId}`).emit('payment-request-updated', response.requestMessage);
       io.to(`conv_${conversationId}`).emit('new-message', response.systemMessage);
+
+      // ✅ NEW: fetch the updated order and emit so the NegotiationPanel
+      // re-enables "Send Payment Details" after the rejection
+      try {
+        const orderId = response.data.paymentProofData.orderId;
+        const Order = require('../models/Order.Model');
+        const updatedOrder = await Order.findOne({ orderId }).lean();
+        if (updatedOrder) {
+          io.to(`conv_${conversationId}`).emit('order-negotiation-updated', updatedOrder);
+          console.log(`📤 Emitted order-negotiation-updated after reject for ${orderId}`);
+        }
+      } catch (e) {
+        console.error('Emit order after reject error:', e);
+      }
     }
 
     res.status(response.success ? 200 : 400).json(response);

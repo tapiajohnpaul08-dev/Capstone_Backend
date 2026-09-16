@@ -78,6 +78,7 @@ class OrderService {
   // CREATE ORDER (updated: no auto-downpayment, server-computed amount)
   // ─────────────────────────────────────────
   async createOrder(payload, user = null, userType = null) {
+    
     const session = await mongoose.startSession();
     try {
       console.log("\n=== 🔵 CREATE ORDER STARTED ===");
@@ -88,6 +89,9 @@ class OrderService {
       let customerName = payload.customerName;
       let customerPhone = payload.customerPhone;
       let customerId = null;
+
+      const customer = await Customer.findOne({ email: customerEmail });
+
 
       // ─── Get or find customer ──────────────────────────────────────────
       if (user && userType === "customer") {
@@ -205,7 +209,7 @@ class OrderService {
               status: "Pending",
               timestamp: new Date(),
               notes: "Order created (customer provided items)",
-              updatedBy: orderedById,
+              updatedBy: `Customer`,
             },
           ],
           customer: {
@@ -351,7 +355,7 @@ class OrderService {
             orderedBy: orderedById,
             notes: payload.notes || `Order with ${processedItems.length} item(s)`,
             statusHistory: [
-              { status: "Pending", timestamp: new Date(), notes: "Order created", updatedBy: orderedById },
+              { status: "Pending", timestamp: new Date(), notes: "Order created", updatedBy: `Customer` },
             ],
             customer: {
               name: customerName,
@@ -493,7 +497,7 @@ class OrderService {
       isProvided: false,
       orderedBy: orderedById,
       notes: payload.notes || `Order with ${processedItems.length} item(s)`,
-      statusHistory: [{ status: "Pending", timestamp: new Date(), notes: "Order created", updatedBy: orderedById }],
+      statusHistory: [{ status: "Pending", timestamp: new Date(), notes: "Order created", updatedBy: `Customer` }],
       customer: {
         name: customerName,
         email: customerEmail,
@@ -1006,14 +1010,14 @@ class OrderService {
         order.updatedAt = new Date();
         order.updatedBy = adminName;
 
-        order.statusHistory.push({
-          status: "Pending",
-          timestamp: new Date(),
-          notes: `Pricing negotiated: ${historyEntries
-            .map((h) => `${h.field} ${h.oldValue}→${h.newValue}`)
-            .join(", ")}`,
-          updatedBy: adminName,
-        });
+        // order.statusHistory.push({
+        //   status: "Pending",
+        //   timestamp: new Date(),
+        //   notes: `Pricing negotiated: ${historyEntries
+        //     .map((h) => `${h.field} ${h.oldValue}→${h.newValue}`)
+        //     .join(", ")}`,
+        //   updatedBy: adminName,
+        // });
 
         await order.save();
       }

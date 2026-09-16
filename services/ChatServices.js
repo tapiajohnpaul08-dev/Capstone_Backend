@@ -2,7 +2,7 @@ const Conversation = require('../models/Conversation.Model');
 const Message = require('../models/Message.Model');
 const Order = require('../models/Order.Model');
 const PaymentOptionsService = require('./PaymentOptionsService');
-
+const Customer = require('../models/Customer.Model')
 const generateId = require('../utils/generateId');
 const { getPublicId } = require('../config/multer');
 
@@ -459,10 +459,12 @@ async sendMessage(conversationId, senderId, senderName, senderType, content, att
         return { success: false, message: 'Order not found' };
       }
 
-      console.log('Linking Order:', orderId)
-      console.log(`Customer ID: ${customerId} -- OrderedBy: ${order.orderedBy}`)
+      const customer = await Customer.findOne({customerId})
+
+      console.log(`Customer ID: ${customer._id} -- OrderedBy: ${order.orderedBy}`)
       console.log('Convo Id', conversationId)
-      if (order.orderedBy !== customerId) {
+
+      if (order.orderedBy != customer._id) {
         return { success: false, message: 'Order does not belong to this customer' };
       }
 
