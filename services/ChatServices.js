@@ -441,6 +441,9 @@ async sendMessage(conversationId, senderId, senderName, senderType, content, att
   // LINK ORDER TO CONVERSATION
   // ─────────────────────────────────────────
   async linkOrderToConversation(conversationId, orderId, customerId) {
+    console.log('Linking Order:', orderId)
+    console.log('Customer Id:', customerId)
+    console.log('Convo Id', conversationId)
     try {
       const conversation = await Conversation.findOne({ conversationId });
       if (!conversation) {
