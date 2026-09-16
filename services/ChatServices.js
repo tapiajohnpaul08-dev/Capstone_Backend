@@ -441,9 +441,7 @@ async sendMessage(conversationId, senderId, senderName, senderType, content, att
   // LINK ORDER TO CONVERSATION
   // ─────────────────────────────────────────
   async linkOrderToConversation(conversationId, orderId, customerId) {
-    console.log('Linking Order:', orderId)
-    console.log('Customer Id:', customerId)
-    console.log('Convo Id', conversationId)
+
     try {
       const conversation = await Conversation.findOne({ conversationId });
       if (!conversation) {
@@ -460,6 +458,10 @@ async sendMessage(conversationId, senderId, senderName, senderType, content, att
       if (!order) {
         return { success: false, message: 'Order not found' };
       }
+
+      console.log('Linking Order:', orderId)
+      console.log(`Customer ID: ${customerId} -- OrderedBy: ${order.orderedBy}`)
+      console.log('Convo Id', conversationId)
       if (order.orderedBy !== customerId) {
         return { success: false, message: 'Order does not belong to this customer' };
       }
