@@ -606,6 +606,26 @@ class OrderService {
         };
       }
 
+            // ── "In Production" is exclusive: only one order at a time ──────────
+      // If moving INTO In Production, make sure no other order is already
+      // in that state. The one exception is if THIS order is already in
+      // production (no-op re-save).
+      if (newStatus === "In Production" && order.status !== "In Production") {
+        const existingInProduction = await Order.findOne({
+          status: "In Production",
+          orderId: { $ne: order.orderId },
+        });
+
+        if (existingInProduction) {
+          return {
+            success: false,
+            message:
+              `Cannot start production — order ${existingInProduction.orderId} ` +
+              `is already in production. Complete or cancel it first.`,
+          };
+        }
+      }
+
       if (!isValidTransition(order.status, newStatus)) {
         return {
           success: false,
