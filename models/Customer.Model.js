@@ -43,6 +43,7 @@ const customerSchema = new mongoose.Schema({
         unique: true,
         index: true
     },
+    status: {type: String, enum:['Active','Offline']},
     phone: { type: String, default: '' },
     email: {
         type: String,
@@ -87,6 +88,7 @@ const customerSchema = new mongoose.Schema({
             ref: 'Order'
         }
     ],  
+    totalSpent: {type: Number, default: 0},
     provider: { type: String, enum: ['google', 'facebook', 'local'], default: 'local' },
     providerId: { type: String, unique: true, sparse: true },
     profileImage: { type: String, default: null },

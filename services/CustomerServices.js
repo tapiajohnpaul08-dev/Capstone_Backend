@@ -43,9 +43,7 @@ class CustomerService {
       // Check if customer already exists
       const existingCustomer = await Customer.findOne({
         $or: [
-          { email: payload.email.toLowerCase() },
-          { username: payload.username },
-        ],
+          { email: payload.email.toLowerCase() }        ],
       });
 
       if (existingCustomer) {
