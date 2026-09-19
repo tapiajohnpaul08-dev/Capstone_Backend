@@ -62,8 +62,25 @@ const customerSchema = new mongoose.Schema({
     templateDesigns: {
         type: [designTemplateSchema],
         default: [],
-        // Remove any index from the array itself
     },
+
+    // ✅ NEW — Saved addresses for future orders
+    addresses: {
+        type: [new mongoose.Schema({
+            label: { type: String, default: '' },      // "Home", "Office", etc.
+            streetAddress: { type: String, default: '' },
+            barangay: { type: String, default: '' },
+            municipality: { type: String, default: '' },
+            province: { type: String, default: '' },
+            postalCode: { type: String, default: '' },
+            region: { type: String, default: '' },
+            country: { type: String, default: 'Philippines' },
+            isDefault: { type: Boolean, default: false },
+            createdAt: { type: Date, default: Date.now },
+        }, { _id: true })],
+        default: [],
+    },
+
     orders: [
         {
             type: mongoose.Schema.Types.ObjectId,

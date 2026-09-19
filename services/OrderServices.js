@@ -61,10 +61,6 @@ function hasValidDesign(item) {
 }
 
 class OrderService {
-  // ─────────────────────────────────────────
-  // HELPER: pick unit price by bulk tier
-  // (used by createOrder + negotiateOrder)
-  // ─────────────────────────────────────────
   _getUnitPriceForQuantity(sizeObj, qty) {
     if (!sizeObj) return 0;
     if (qty >= 5000 && sizeObj.bulkPrices?.[5000]) return sizeObj.bulkPrices[5000] / 5000;
@@ -72,6 +68,25 @@ class OrderService {
     if (qty >= 1000 && sizeObj.bulkPrices?.[1000]) return sizeObj.bulkPrices[1000] / 1000;
     if (qty >= 500 && sizeObj.bulkPrices?.[500]) return sizeObj.bulkPrices[500] / 500;
     return sizeObj.price;
+  }
+
+  // ✅ FIX #1 — Payment ledger helpers (single source of truth)
+  _computeOrderTotal(order) {
+    return Number(order.amount) || Number(order.totalAmount) || 0;
+  }
+
+  _computeTotalPaid(order) {
+    if (!Array.isArray(order.partialPayments)) return 0;
+    return order.partialPayments.reduce(
+      (sum, p) => sum + (Number(p.amount) || 0),
+      0,
+    );
+  }
+
+  _computeRemainingBalance(order) {
+    const total = this._computeOrderTotal(order);
+    const paid = this._computeTotalPaid(order);
+    return Math.max(0, total - paid);
   }
 
   // ─────────────────────────────────────────
@@ -585,18 +600,22 @@ class OrderService {
         };
       }
 
+      // ✅ FIX #1b — Strict guard: refuse to complete a Partial order
+      // unless the caller confirms the remaining balance was collected.
       if (newStatus === "Completed") {
         const needsCodCollection = order.paymentStatus === "Partial";
-        const canAutoPay = !needsCodCollection || codCollected === true;
 
-        if (canAutoPay) {
-          await this.updatePaymentStatus(orderId, "Paid", order.totalAmount, user);
-        } else {
-          // Leave paymentStatus as Partial — driver didn't confirm collection
-          console.log(
-            `⚠️ Order ${order.orderId} completed but COD not confirmed — paymentStatus stays "${order.paymentStatus}"`
-          );
+        if (needsCodCollection && codCollected !== true) {
+          return {
+            success: false,
+            message:
+              "This order still has an unpaid balance. Please confirm the remaining balance has been collected before completing.",
+          };
         }
+
+        // Flip to Paid — updatePaymentStatus (FIX #1a) records the
+        // remaining balance in partialPayments.
+        await this.updatePaymentStatus(orderId, "Paid", order.totalAmount, user);
       }
 
       if (order.status === "Completed" || order.status === "Cancelled") {
@@ -604,26 +623,6 @@ class OrderService {
           success: false,
           message: `Cannot change status of a ${order.status.toLowerCase()} order`,
         };
-      }
-
-            // ── "In Production" is exclusive: only one order at a time ──────────
-      // If moving INTO In Production, make sure no other order is already
-      // in that state. The one exception is if THIS order is already in
-      // production (no-op re-save).
-      if (newStatus === "In Production" && order.status !== "In Production") {
-        const existingInProduction = await Order.findOne({
-          status: "In Production",
-          orderId: { $ne: order.orderId },
-        });
-
-        if (existingInProduction) {
-          return {
-            success: false,
-            message:
-              `Cannot start production — order ${existingInProduction.orderId} ` +
-              `is already in production. Complete or cancel it first.`,
-          };
-        }
       }
 
       if (!isValidTransition(order.status, newStatus)) {
@@ -1366,23 +1365,57 @@ class OrderService {
           paymentStatus = 'Unpaid';
         }
       } else {
-        if (paymentStatus === "Partial" && (amountPaid === null || amountPaid === undefined)) {
-          return { success: false, message: "amountPaid is required when marking payment as Partial" };
-        }
-        if (paymentStatus === "Partial" && Number(amountPaid) <= 0) {
-          return { success: false, message: "amountPaid must be greater than 0" };
-        }
-        if (paymentStatus === "Partial" && Number(amountPaid) >= Number(order.amount)) {
-          return { success: false, message: "amountPaid must be less than the order total for a Partial payment. Use 'Paid' instead." };
-        }
+        // ─── Partial payment: validate then record ─────────────────────
+        if (paymentStatus === "Partial") {
+          if (amountPaid === null || amountPaid === undefined) {
+            return { success: false, message: "amountPaid is required when marking payment as Partial" };
+          }
+          if (Number(amountPaid) <= 0) {
+            return { success: false, message: "amountPaid must be greater than 0" };
+          }
+          if (Number(amountPaid) >= Number(order.amount)) {
+            return {
+              success: false,
+              message: "amountPaid must be less than the order total for a Partial payment. Use 'Paid' instead.",
+            };
+          }
 
-        if (paymentStatus === "Partial" && amountPaid) {
           order.partialPayments = order.partialPayments || [];
           order.partialPayments.push({
-            amount: amountPaid,
+            amount: Number(amountPaid),
+            referenceNumber: null,
             date: new Date(),
-            updatedBy: user ? (user._id?.toString() || user.email || 'Admin') : 'Admin',
+            updatedBy: user ? user._id?.toString() || user.email || "Admin" : "Admin",
           });
+        }
+
+        // ✅ FIX #1a — Paid: record ANY remaining balance
+        // This fires when the driver/admin marks Completed with COD
+        // collected, or when an admin manually flips to Paid. Guarantees
+        // the ledger is complete (downpayment + final settlement).
+        if (paymentStatus === "Paid") {
+          const totalAmount = Number(order.amount) || Number(order.totalAmount) || 0;
+          const alreadyPaid = Array.isArray(order.partialPayments)
+            ? order.partialPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0)
+            : 0;
+          const remainingBalance = Math.max(0, totalAmount - alreadyPaid);
+
+          if (remainingBalance > 0) {
+            order.partialPayments = order.partialPayments || [];
+            order.partialPayments.push({
+              amount: remainingBalance,
+              referenceNumber: null,
+              date: new Date(),
+              updatedBy: user
+                ? user.firstName
+                  ? `${user.firstName} ${user.lastName}`
+                  : user.email || user._id?.toString() || "System"
+                : "System (auto-recorded on Paid)",
+            });
+            console.log(
+              `✅ Recorded remaining balance ₱${remainingBalance} for order ${order.orderId}`,
+            );
+          }
         }
       }
 
@@ -1518,8 +1551,35 @@ class OrderService {
       order.updatedAt = new Date();
 
       if (isReceived) {
+        // ✅ FIX #1c — Record remaining balance BEFORE flipping to Paid
+        const totalAmount = Number(order.amount) || Number(order.totalAmount) || 0;
+        const alreadyPaid = Array.isArray(order.partialPayments)
+          ? order.partialPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0)
+          : 0;
+        const remainingBalance = Math.max(0, totalAmount - alreadyPaid);
+
+        if (remainingBalance > 0) {
+          order.partialPayments = order.partialPayments || [];
+          order.partialPayments.push({
+            amount: remainingBalance,
+            referenceNumber: null,
+            date: new Date(),
+            updatedBy: user
+              ? user.firstName
+                ? `${user.firstName} ${user.lastName}`
+                : user.email || "Customer"
+              : "Customer (marked received)",
+          });
+          console.log(
+            `✅ Recorded remaining balance ₱${remainingBalance} for order ${order.orderId} (customer received)`,
+          );
+        }
+
         order.status = "Completed";
         order.paymentStatus = "Paid";
+        order.paymentDetails = order.paymentDetails || {};
+        order.paymentDetails.paidAt = new Date();
+
         order.statusHistory.push({
           status: "Completed",
           timestamp: new Date(),

@@ -28,6 +28,15 @@ router.post('/update-password-with-otp', CustomerController.updatePasswordWithOt
 router.put('/update-password-with-current/:customerId', CustomerController.updatePasswordWithCurrent);
 
 // ─────────────────────────────────────────
+// ✅ NEW — SAVED ADDRESS ROUTES
+// ─────────────────────────────────────────
+router.get('/:customerId/addresses',                    verifyCustomerToken, CustomerController.getAddresses);
+router.post('/:customerId/addresses',                   verifyCustomerToken, CustomerController.addAddress);
+router.put('/:customerId/addresses/:addressId',         verifyCustomerToken, CustomerController.updateAddress);
+router.delete('/:customerId/addresses/:addressId',      verifyCustomerToken, CustomerController.deleteAddress);
+router.patch('/:customerId/addresses/:addressId/default', verifyCustomerToken, CustomerController.setDefaultAddress);
+
+// ─────────────────────────────────────────
 // CUSTOMER TEMPLATE ROUTES
 // ─────────────────────────────────────────
 router.get('/templates', verifyCustomerToken, CustomerTemplateController.getTemplates);

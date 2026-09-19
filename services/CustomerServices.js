@@ -437,6 +437,144 @@ async requestPasswordChangeOtp(email) {
       throw error;
     }
   }
+
+  // ─────────────────────────────────────────
+  // ✅ NEW — SAVED ADDRESSES
+  // ─────────────────────────────────────────
+
+  async getAddresses(customerId) {
+    try {
+      const customer = await Customer.findOne({ customerId }).select('addresses');
+      if (!customer) {
+        return { success: false, message: 'Customer not found' };
+      }
+      return { success: true, data: customer.addresses || [] };
+    } catch (error) {
+      console.error('Error fetching addresses:', error);
+      throw error;
+    }
+  }
+
+  async addAddress(customerId, data) {
+    try {
+      const customer = await Customer.findOne({ customerId });
+      if (!customer) {
+        return { success: false, message: 'Customer not found' };
+      }
+
+      // If this is the first address OR isDefault is true, make it default
+      const isFirst = customer.addresses.length === 0;
+      const makeDefault = isFirst || data.isDefault === true;
+
+      // If makeDefault, clear default flag on all existing addresses first
+      if (makeDefault) {
+        customer.addresses.forEach((a) => { a.isDefault = false });
+      }
+
+      customer.addresses.push({
+        label: data.label || '',
+        streetAddress: data.streetAddress || '',
+        barangay: data.barangay || '',
+        municipality: data.municipality || '',
+        province: data.province || '',
+        postalCode: data.postalCode || '',
+        region: data.region || '',
+        country: data.country || 'Philippines',
+        isDefault: makeDefault,
+      });
+
+      await customer.save();
+
+      const newAddress = customer.addresses[customer.addresses.length - 1];
+      return { success: true, data: newAddress };
+    } catch (error) {
+      console.error('Error adding address:', error);
+      throw error;
+    }
+  }
+
+  async updateAddress(customerId, addressId, data) {
+    try {
+      const customer = await Customer.findOne({ customerId });
+      if (!customer) {
+        return { success: false, message: 'Customer not found' };
+      }
+
+      const address = customer.addresses.id(addressId);
+      if (!address) {
+        return { success: false, message: 'Address not found' };
+      }
+
+      // If setting isDefault to true, clear others
+      if (data.isDefault === true) {
+        customer.addresses.forEach((a) => { a.isDefault = false });
+      }
+
+      // Whitelisted fields
+      const fields = ['label', 'streetAddress', 'barangay', 'municipality',
+                      'province', 'postalCode', 'region', 'country', 'isDefault'];
+      fields.forEach((f) => {
+        if (data[f] !== undefined) address[f] = data[f];
+      });
+
+      await customer.save();
+      return { success: true, data: address };
+    } catch (error) {
+      console.error('Error updating address:', error);
+      throw error;
+    }
+  }
+
+  async deleteAddress(customerId, addressId) {
+    try {
+      const customer = await Customer.findOne({ customerId });
+      if (!customer) {
+        return { success: false, message: 'Customer not found' };
+      }
+
+      const address = customer.addresses.id(addressId);
+      if (!address) {
+        return { success: false, message: 'Address not found' };
+      }
+
+      const wasDefault = address.isDefault;
+      address.deleteOne();
+
+      // If we just deleted the default, promote the next one to default
+      if (wasDefault && customer.addresses.length > 0) {
+        customer.addresses[0].isDefault = true;
+      }
+
+      await customer.save();
+      return { success: true, message: 'Address deleted' };
+    } catch (error) {
+      console.error('Error deleting address:', error);
+      throw error;
+    }
+  }
+
+  async setDefaultAddress(customerId, addressId) {
+    try {
+      const customer = await Customer.findOne({ customerId });
+      if (!customer) {
+        return { success: false, message: 'Customer not found' };
+      }
+
+      const address = customer.addresses.id(addressId);
+      if (!address) {
+        return { success: false, message: 'Address not found' };
+      }
+
+      customer.addresses.forEach((a) => { a.isDefault = false });
+      address.isDefault = true;
+
+      await customer.save();
+      return { success: true, data: address };
+    } catch (error) {
+      console.error('Error setting default address:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = new CustomerService();

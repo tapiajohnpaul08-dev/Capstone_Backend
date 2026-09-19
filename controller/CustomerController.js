@@ -175,6 +175,58 @@ requestPasswordChangeOtp = asyncTryCatch(async (req, res, next) => {
         const status = response.success ? 200 : 404;
         res.status(status).json(response);
     });
+
+    // ─────────────────────────────────────────
+    // ✅ NEW — SAVED ADDRESSES
+    // ─────────────────────────────────────────
+
+    // GET /api/v1/customer/:customerId/addresses
+    getAddresses = asyncTryCatch(async (req, res, next) => {
+        const response = await customerService.getAddresses(req.params.customerId);
+        const status = response.success ? 200 : 404;
+        res.status(status).json(response);
+    });
+
+    // POST /api/v1/customer/:customerId/addresses
+    addAddress = asyncTryCatch(async (req, res, next) => {
+        const response = await customerService.addAddress(
+            req.params.customerId,
+            req.body,
+        );
+        const status = response.success ? 201 : 400;
+        res.status(status).json(response);
+    });
+
+    // PUT /api/v1/customer/:customerId/addresses/:addressId
+    updateAddress = asyncTryCatch(async (req, res, next) => {
+        const response = await customerService.updateAddress(
+            req.params.customerId,
+            req.params.addressId,
+            req.body,
+        );
+        const status = response.success ? 200 : 404;
+        res.status(status).json(response);
+    });
+
+    // DELETE /api/v1/customer/:customerId/addresses/:addressId
+    deleteAddress = asyncTryCatch(async (req, res, next) => {
+        const response = await customerService.deleteAddress(
+            req.params.customerId,
+            req.params.addressId,
+        );
+        const status = response.success ? 200 : 404;
+        res.status(status).json(response);
+    });
+
+    // PATCH /api/v1/customer/:customerId/addresses/:addressId/default
+    setDefaultAddress = asyncTryCatch(async (req, res, next) => {
+        const response = await customerService.setDefaultAddress(
+            req.params.customerId,
+            req.params.addressId,
+        );
+        const status = response.success ? 200 : 404;
+        res.status(status).json(response);
+    });
 }
 
 module.exports = new CustomerController();
