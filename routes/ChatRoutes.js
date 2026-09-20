@@ -21,7 +21,8 @@ router.post('/customer/payment-proof', verifyCustomerToken, ChatController.sendP
 // ADMIN ROUTES
 // ─────────────────────────────────────────
 router.get('/admin/conversations', verifyAdminToken, ChatController.getAdminConversations);
-router.get('/admin/conversations/:conversationId/messages', verifyAdminToken, ChatController.getMessages);
+// ✅ NEW — Pending negotiations (must come BEFORE /admin/conversations/:id)
+router.get('/admin/pending-negotiations', verifyAdminToken, ChatController.getPendingNegotiations);router.get('/admin/conversations/:conversationId/messages', verifyAdminToken, ChatController.getMessages);
 router.post('/admin/messages', verifyAdminToken, ChatController.sendMessage);
 router.get('/admin/unread-count', verifyAdminToken, ChatController.getAdminUnreadCount);
 router.patch('/admin/conversations/:conversationId/assign', verifyAdminToken, ChatController.assignConversation);

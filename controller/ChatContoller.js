@@ -27,10 +27,15 @@ class ChatController {
     res.status(200).json(response);
   });
 
+  // ✅ NEW — Pending negotiations
+  getPendingNegotiations = asyncTryCatch(async (req, res, next) => {
+    const response = await chatService.getPendingNegotiations();
+    res.status(200).json(response);
+  });
+
   getConversation = asyncTryCatch(async (req, res, next) => {
     res.status(200).json({ success: true });
   });
-
   assignConversation = asyncTryCatch(async (req, res, next) => {
     const { conversationId } = req.params;
     const { adminId, firstName, lastName } = req.admin;

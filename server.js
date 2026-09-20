@@ -16,10 +16,8 @@ require('./config/db_config');
 const app = express();
 const server = http.createServer(app);
 
-// ✅ FIX — Trust Render's reverse proxy so req.ip is accurate and
-// express-rate-limit can identify real client IPs.
+// ✅ Trust Render's reverse proxy so req.ip is accurate
 app.set('trust proxy', 1);
-
 // ─────────────────────────────────────────
 // CORS CONFIGURATION - PRODUCTION READY
 // ─────────────────────────────────────────

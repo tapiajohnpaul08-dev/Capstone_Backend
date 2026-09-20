@@ -13,28 +13,83 @@ class ChatService {
   // CONVERSATIONS
   // ─────────────────────────────────────────
   
+  // ✅ UPDATED — Per-order conversations.
+  // If orderId is provided:
+  //   1. Look for an EXISTING conversation for (customerId, orderId)
+  //      in ANY status (open, in_progress, resolved, closed).
+  //   2. If found, reuse it — don't create a duplicate.
+  //   3. If not found, create a NEW conversation just for this order.
+  // If orderId is NOT provided:
+  //   Fall back to the old behavior — find an open conversation with
+  //   no orderId linked (or create one).
   async getOrCreateConversation(customerId, customerName, customerEmail, subject = '', orderId = null) {
     try {
-      let conversation = await Conversation.findOne({
-        customerId,
-        status: { $in: ['open', 'in_progress'] },
-        ...(orderId && { orderId })
-      }).sort({ lastMessageAt: -1 });
-      
-      if (!conversation) {
-        conversation = new Conversation({
-          conversationId: await generateId('CONV'),
-          customerId,
-          customerName,
-          customerEmail,
-          subject: subject || 'General Inquiry',
-          orderId: orderId || null,
-          status: 'open',
-          lastMessageAt: new Date()
-        });
-        await conversation.save();
+      // ✅ FIX — Normalize the customer name from the actual customer
+      // record so it doesn't matter what the caller passed. This ensures
+      // the conversation sidebar always shows the real name.
+      let resolvedName = customerName;
+      let resolvedEmail = customerEmail;
+
+      const existingCustomer = await Customer.findOne({ customerId });
+      if (existingCustomer) {
+        const realName =
+          `${existingCustomer.firstName || ''} ${existingCustomer.lastName || ''}`.trim();
+        if (realName) resolvedName = realName;
+        if (!resolvedEmail) resolvedEmail = existingCustomer.email;
       }
-      
+
+      let conversation = null;
+
+      if (orderId) {
+        // Per-order lookup — reuse even closed/resolved threads so the
+        // history stays attached to its order.
+        conversation = await Conversation.findOne({
+          customerId,
+          orderId,
+        });
+
+        if (!conversation) {
+          conversation = new Conversation({
+            conversationId: await generateId('CONV'),
+            customerId,
+            customerName: resolvedName || 'Customer',
+            customerEmail: resolvedEmail || '',
+            subject: subject || `Order ${orderId}`,
+            orderId,
+            status: 'open',
+            lastMessageAt: new Date(),
+          });
+          await conversation.save();
+          console.log(
+            `📬 Created per-order conversation ${conversation.conversationId} for ${orderId}`,
+          );
+        }
+      } else {
+        // No orderId — old behavior. Find an open unlinked conversation.
+        conversation = await Conversation.findOne({
+          customerId,
+          status: { $in: ['open', 'in_progress'] },
+          $or: [{ orderId: null }, { orderId: '' }, { orderId: { $exists: false } }],
+        }).sort({ lastMessageAt: -1 });
+
+        if (!conversation) {
+          conversation = new Conversation({
+            conversationId: await generateId('CONV'),
+            customerId,
+            customerName: resolvedName || 'Customer',
+            customerEmail: resolvedEmail || '',
+            subject: subject || 'General Inquiry',
+            orderId: null,
+            status: 'open',
+            lastMessageAt: new Date(),
+          });
+          await conversation.save();
+          console.log(
+            `📬 Created general conversation ${conversation.conversationId} for ${customerId}`,
+          );
+        }
+      }
+
       return { success: true, data: conversation };
     } catch (error) {
       console.error('Error in getOrCreateConversation:', error);
@@ -42,8 +97,162 @@ class ChatService {
     }
   }
   
+  // ─────────────────────────────────────────────────────────────────
+  // ✅ NEW — Auto-link orphaned orders to conversations
+  //
+  // Runs before returning conversation lists. Finds any Pending +
+  // Unpaid orders that don't have a linked conversation yet, and
+  // attaches them to an existing unlinked conversation (or creates
+  // a fresh per-order one).
+  // ─────────────────────────────────────────────────────────────────
+
+  // Customer-scoped: only look at ONE customer's orders
+  async _autoLinkOrphanedOrdersForCustomer(customerId) {
+    try {
+      const Order = require('../models/Order.Model');
+
+      const customer = await Customer.findOne({ customerId });
+      if (!customer) return;
+
+      const pendingOrders = await Order.find({
+        orderedBy: customer._id.toString(),
+        status: 'Pending',
+        paymentStatus: 'Unpaid',
+      }).lean();
+
+      if (!pendingOrders.length) return;
+
+      const linkedOrderIds = (
+        await Conversation.find({
+          customerId,
+          orderId: { $nin: [null, ''] },
+        }).select('orderId')
+      ).map((c) => c.orderId);
+
+      const unlinkedOrders = pendingOrders.filter(
+        (o) => !linkedOrderIds.includes(o.orderId),
+      );
+      if (!unlinkedOrders.length) return;
+
+      for (const order of unlinkedOrders) {
+        const unlinkedConv = await Conversation.findOne({
+          customerId,
+          status: { $in: ['open', 'in_progress'] },
+          $or: [{ orderId: null }, { orderId: '' }, { orderId: { $exists: false } }],
+        }).sort({ lastMessageAt: -1 });
+
+        if (unlinkedConv) {
+          unlinkedConv.orderId = order.orderId;
+          unlinkedConv.subject = `Order ${order.orderId}`;
+          unlinkedConv.updatedAt = new Date();
+          await unlinkedConv.save();
+          console.log(
+            `🔗 Auto-linked orphaned order ${order.orderId} → ${unlinkedConv.conversationId}`,
+          );
+        } else {
+          const newConv = new Conversation({
+            conversationId: await generateId('CONV'),
+            customerId,
+            customerName:
+              `${customer.firstName || ''} ${customer.lastName || ''}`.trim() ||
+              customer.email,
+            customerEmail: customer.email,
+            subject: `Order ${order.orderId}`,
+            orderId: order.orderId,
+            status: 'open',
+            lastMessageAt: new Date(),
+          });
+          await newConv.save();
+          console.log(
+            `🆕 Created conversation for orphaned order ${order.orderId}`,
+          );
+        }
+      }
+    } catch (err) {
+      // Never break the conversation list because of this
+      console.error('_autoLinkOrphanedOrdersForCustomer failed:', err);
+    }
+  }
+
+  // Admin-scoped: scan recent pending orders across all customers
+  async _autoLinkAllOrphanedOrders() {
+    try {
+      const Order = require('../models/Order.Model');
+
+      // Bound the scan to the last 14 days
+      const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+
+      const pendingOrders = await Order.find({
+        status: 'Pending',
+        paymentStatus: 'Unpaid',
+        createdAt: { $gte: since },
+      }).lean();
+
+      if (!pendingOrders.length) return;
+
+      const linkedOrderIds = (
+        await Conversation.find({ orderId: { $nin: [null, ''] } }).select('orderId')
+      ).map((c) => c.orderId);
+
+      const orphaned = pendingOrders.filter(
+        (o) => !linkedOrderIds.includes(o.orderId),
+      );
+      if (!orphaned.length) return;
+
+      for (const order of orphaned) {
+        // Resolve customer via orderedBy, fallback to email
+        let customer = null;
+        if (order.orderedBy) {
+          try {
+            customer = await Customer.findById(order.orderedBy);
+          } catch {
+            customer = await Customer.findOne({ customerId: order.orderedBy });
+          }
+        }
+        if (!customer && order.customerEmail) {
+          customer = await Customer.findOne({
+            email: order.customerEmail.toLowerCase(),
+          });
+        }
+        if (!customer) continue;
+
+        let conv = await Conversation.findOne({
+          customerId: customer.customerId,
+          $or: [{ orderId: null }, { orderId: '' }, { orderId: { $exists: false } }],
+        }).sort({ lastMessageAt: -1 });
+
+        if (conv) {
+          conv.orderId = order.orderId;
+          conv.subject = `Order ${order.orderId}`;
+          conv.updatedAt = new Date();
+          await conv.save();
+          console.log(`🔗 Admin auto-link ${order.orderId} → ${conv.conversationId}`);
+        } else {
+          await Conversation.create({
+            conversationId: await generateId('CONV'),
+            customerId: customer.customerId,
+            customerName:
+              `${customer.firstName || ''} ${customer.lastName || ''}`.trim() ||
+              customer.email,
+            customerEmail: customer.email,
+            subject: `Order ${order.orderId}`,
+            orderId: order.orderId,
+            status: 'open',
+            lastMessageAt: new Date(),
+          });
+          console.log(`🆕 Admin created conversation for orphaned ${order.orderId}`);
+        }
+      }
+    } catch (err) {
+      console.error('_autoLinkAllOrphanedOrders failed:', err);
+    }
+  }
+
   async getCustomerConversations(customerId, filters = {}) {
     try {
+      // ✅ NEW — link any orphaned Pending orders first
+      await this._autoLinkOrphanedOrdersForCustomer(customerId);
+
       const query = { customerId };
       if (filters.status) query.status = filters.status;
       if (filters.orderId) query.orderId = filters.orderId;
@@ -71,6 +280,9 @@ class ChatService {
   
   async getAdminConversations(filters = {}) {
     try {
+      // ✅ NEW — safety net: scan for orphaned orders across all customers
+      await this._autoLinkAllOrphanedOrders();
+
       const query = {};
       if (filters.status) query.status = filters.status;
       if (filters.adminId) query.adminId = filters.adminId;
@@ -96,6 +308,62 @@ class ChatService {
     }
   }
   
+  // ─────────────────────────────────────────────────────────────────
+  // ✅ NEW — Pending negotiations
+  // Returns all open conversations whose linked order is
+  // Pending + Unpaid. This is what admin needs to negotiate.
+  // ─────────────────────────────────────────────────────────────────
+  async getPendingNegotiations() {
+    try {
+      // 1. Find all open conversations that have an orderId
+      const conversations = await Conversation.find({
+        status: { $in: ['open', 'in_progress'] },
+        orderId: { $nin: [null, ''] },
+      }).sort({ lastMessageAt: -1 });
+
+      if (conversations.length === 0) {
+        return { success: true, data: [], count: 0 };
+      }
+
+      // 2. Collect all orderIds for a single bulk query
+      const orderIds = conversations.map((c) => c.orderId);
+      const Order = require('../models/Order.Model');
+      const pendingOrders = await Order.find({
+        orderId: { $in: orderIds },
+        status: 'Pending',
+        paymentStatus: 'Unpaid',
+      }).select('orderId amount totalAmount customerName');
+
+      // 3. Build a lookup map
+      const pendingOrderMap = new Map();
+      for (const o of pendingOrders) {
+        pendingOrderMap.set(o.orderId, o);
+      }
+
+      // 4. Filter conversations whose order is still Pending + Unpaid
+      const result = conversations
+        .filter((c) => pendingOrderMap.has(c.orderId))
+        .map((c) => {
+          const order = pendingOrderMap.get(c.orderId);
+          return {
+            conversationId: c.conversationId,
+            orderId: c.orderId,
+            customerName: c.customerName,
+            customerEmail: c.customerEmail,
+            amount: order.amount || order.totalAmount || 0,
+            lastMessage: c.lastMessage || '',
+            lastMessageAt: c.lastMessageAt,
+            unreadCount: c.adminUnreadCount || 0,
+          };
+        });
+
+      return { success: true, data: result, count: result.length };
+    } catch (error) {
+      console.error('Error in getPendingNegotiations:', error);
+      throw error;
+    }
+  }
+
   async assignConversation(conversationId, adminId, adminName) {
     try {
       const conversation = await Conversation.findOne({ conversationId });

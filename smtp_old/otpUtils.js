@@ -1,16 +1,15 @@
 // utils/otpUtils.js
 const bcrypt = require('bcrypt');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const Otp = require('../models/Otp.Model');
 
-// ─── Email transporter ─────────────────────────────────────────────────
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+// The "from" address must be:
+//   - A verified domain (e.g., "ACAPHOP <noreply@acaphop.com>"), OR
+//   - Resend's onboarding address for testing: "onboarding@resend.dev"
+const FROM_ADDRESS = process.env.RESEND_FROM
+  || 'ACAPHOP <onboarding@resend.dev>';
 
 const OTP_TTL_MINUTES = 1;        // must match the email copy below
 const OTP_MAX_ATTEMPTS = 3;
@@ -33,33 +32,27 @@ const generateOtp = (length = 6) => {
  * Send OTP email
  */
 const sendOtpEmail = async (email, otp) => {
-  const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-      <h2 style="color: #333;">Email Verification</h2>
-      <p>Thank you for registering! Please use the following OTP to verify your email address:</p>
-      <div style="text-align: center; margin: 30px 0;">
-        <span style="font-size: 32px; font-weight: bold; letter-spacing: 5px; background: #f0f0f0; padding: 10px 20px; border-radius: 5px;">${otp}</span>
-      </div>
-      <p style="color: #666; font-size: 14px;">This OTP is valid for ${OTP_TTL_MINUTES} minute${OTP_TTL_MINUTES > 1 ? 's' : ''}.</p>
-      <p style="color: #999; font-size: 12px;">If you didn't request this, please ignore this email.</p>
-    </div>
-  `;
+  const html = `...`;
 
   try {
-    await transporter.sendMail({
-      from: `"ACAPHOP" <${process.env.EMAIL_USER}>`,
+    const result = await resend.emails.send({
+      from: FROM_ADDRESS,
       to: email,
       subject: 'Verify Your Email - OTP Code',
       html,
       text: `Your OTP for email verification is: ${otp}\n\nValid for ${OTP_TTL_MINUTES} minute(s).`,
     });
+    if (result.error) {
+      console.error('Resend error:', result.error);
+      return false;
+    }
+    console.log('✅ OTP email sent via Resend:', result.data?.id);
     return true;
   } catch (error) {
     console.error('Email sending failed:', error);
     return false;
   }
 };
-
 /**
  * Store OTP in MongoDB with hashed value + TTL expiry
  */

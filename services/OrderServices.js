@@ -14,6 +14,12 @@ const Message = require('../models/Message.Model');
 // ─── Constants ──────────────────────────────────────────────────────────────
 const DESIGN_AND_PRINTING_FEE = 500;
 
+// Emoji toggles for the auto-greeting — set to '' to disable any
+const GREETING_EMOJI = {
+  wave: '👋',
+  party: '🎉',
+};
+
 // ─── Status constants ──────────────────────────────────────────────────────
 const VALID_STATUSES = [
   "Pending",
@@ -87,6 +93,205 @@ class OrderService {
     const total = this._computeOrderTotal(order);
     const paid = this._computeTotalPaid(order);
     return Math.max(0, total - paid);
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // ✅ NEW — Auto-link the order to a chat conversation
+  // Called right after a new order is saved. Ensures the customer has
+  // an open conversation with admin bound to this order, so the admin's
+  // NegotiationPanel appears immediately without the customer having
+  // to manually pick a Pending order.
+  // ─────────────────────────────────────────────────────────────────
+  // ✅ SIMPLIFIED — Per-order conversations.
+  // Every order gets its OWN conversation. We look up the customer,
+  // then delegate to ChatServices.getOrCreateConversation() which
+  // handles per-order matching (reuses if a conversation for this
+  // specific order already exists).
+  async _autoLinkOrderToConversation(order) {
+    try {
+      if (!order) return;
+
+      const chatService = require('./ChatServices');
+
+      // ── Resolve the customer ─────────────────────────────────────
+      // Priority order:
+      //   1. orderedBy (Mongo _id) — set by createOrder, always reliable
+      //   2. Fall back to customerEmail lookup
+      // This handles the case where the customer checks out with a
+      // shipping email that differs from their account email.
+      let customer = null;
+
+      if (order.orderedBy) {
+        try {
+          customer = await Customer.findById(order.orderedBy);
+        } catch (e) {
+          // orderedBy may be a customerId string in some legacy records
+          customer = await Customer.findOne({ customerId: order.orderedBy });
+        }
+      }
+
+      if (!customer && order.customerEmail) {
+        customer = await Customer.findOne({
+          email: order.customerEmail.toLowerCase(),
+        });
+      }
+
+      if (!customer) {
+        console.warn(
+          `⚠️ Auto-link skipped for order ${order.orderId} — ` +
+          `no registered customer found (orderedBy=${order.orderedBy}, email=${order.customerEmail})`,
+        );
+        return;
+      }
+
+      const chatCustomerId = customer.customerId;
+      if (!chatCustomerId) {
+        console.warn(
+          `⚠️ Auto-link skipped for order ${order.orderId} — ` +
+          `customer ${customer._id} has no customerId`,
+        );
+        return;
+      }
+
+      // Use the real customer name and email (not the order's
+      // possibly-overwritten shipping fields)
+      const customerName =
+        `${customer.firstName || ''} ${customer.lastName || ''}`.trim() ||
+        customer.email;
+      const customerEmail = customer.email;
+
+      // getOrCreateConversation guarantees ONE conversation per order.
+      const result = await chatService.getOrCreateConversation(
+        chatCustomerId,
+        customerName,
+        customerEmail,
+        `Order ${order.orderId}`,
+        order.orderId,
+      );
+
+      if (result?.success && result.data) {
+        console.log(
+          `🔗 Order ${order.orderId} linked to conversation ${result.data.conversationId} (customerId=${chatCustomerId})`,
+        );
+
+        // ✅ Only greet if this is a fresh conversation. If the conversation
+        // already had messages (meaning the customer and admin had already
+        // started talking), we don't want to spam them with a greeting every
+        // time the order doc is touched.
+        const isNewConversation = !result.data.lastMessage ||
+                                   result.data.lastMessage.trim() === '';
+
+        if (isNewConversation) {
+          await this._sendOrderGreeting(result.data, order, customerName);
+        }
+      }
+    } catch (err) {
+      // Never let chat linking break order creation
+      console.error('Auto-link order to conversation failed:', err);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // ✅ NEW — Send the admin's auto-greeting to the customer
+  //
+  // Fires right after a new per-order conversation is created. The
+  // message is sent as the "admin" so it shows up on the customer's
+  // admin-message side and triggers their unread badge.
+  // ─────────────────────────────────────────────────────────────────
+  async _sendOrderGreeting(conversation, order, customerName) {
+    try {
+      const chatService = require('./ChatServices');
+
+      // Format the order amount nicely
+      const amount = order.amount || order.totalAmount || 0;
+      const formattedAmount = Number(amount).toLocaleString('en-PH');
+
+      // Pull the customer's first name for a personal touch
+      const firstName = (customerName || '').split(' ')[0] || 'there';
+
+      // A short, professional greeting. Kept friendly but not too casual.
+      const greeting =
+        `Hi ${firstName}! ${GREETING_EMOJI.wave}\n\n` +
+        `Thank you for placing order ${order.orderId} with ACAPSHOP. ` +
+        `We've received your request and we're excited to work with you.\n\n` +
+        `To make sure everything is exactly right, we'll use this chat to ` +
+        `review the details together — including:\n` +
+        `• Final pricing and any adjustments\n` +
+        `• Design placement and print specifications\n` +
+        `• Delivery or pickup arrangements\n\n` +
+        `The current estimated total is ₱${formattedAmount}. ` +
+        `This is a starting estimate — we'll confirm the final price with you ` +
+        `before any payment is made.\n\n` +
+        `Feel free to reply here with any questions, and we'll respond as ` +
+        `soon as possible. Thank you for choosing ACAPSHOP! 🎉`;
+
+      const result = await chatService.sendMessage(
+        conversation.conversationId,
+        'admin',                            // senderId (matches adminName flow)
+        'ACAPSHOP Support',                 // senderName
+        'admin',                            // senderType
+        greeting,
+        [],                                 // attachments
+        null,                               // replyToMessageId
+      );
+
+      if (result?.success) {
+        console.log(
+          `💬 Auto-greeting sent to ${conversation.conversationId} for order ${order.orderId}`,
+        );
+      } else {
+        console.warn(
+          `⚠️ Auto-greeting failed for ${order.orderId}: ${result?.message || 'unknown error'}`,
+        );
+      }
+    } catch (err) {
+      // Non-fatal: never break order creation because of a chat message
+      console.error('Failed to send auto-greeting:', err);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // ✅ NEW — totalSpent tracking
+  // Applies a delta to the customer's totalSpent field. Accepts either
+  // a delta (positive/negative number) OR the before/after totals to
+  // compute the delta automatically.
+  // ─────────────────────────────────────────────────────────────────
+  async _applyTotalSpentDelta(order, delta) {
+    if (!delta || isNaN(delta) || delta === 0) return;
+
+    try {
+      // Find the customer by orderedBy (mongo _id) or customerEmail
+      let customer = null;
+
+      if (order.orderedBy) {
+        customer = await Customer.findById(order.orderedBy);
+      }
+      if (!customer && order.customerEmail) {
+        customer = await Customer.findOne({ email: order.customerEmail.toLowerCase() });
+      }
+
+      if (!customer) {
+        console.warn(
+          `⚠️ Cannot update totalSpent — no customer found for order ${order.orderId} (orderedBy: ${order.orderedBy}, email: ${order.customerEmail})`,
+        );
+        return;
+      }
+
+      // Prevent going below 0 (safety net for edge cases)
+      const current = Number(customer.totalSpent) || 0;
+      const next = Math.max(0, current + delta);
+
+      customer.totalSpent = next;
+      customer.updatedAt = new Date();
+      await customer.save();
+
+      console.log(
+        `💰 totalSpent ${delta > 0 ? '+' : ''}${delta} for ${customer.email} (was ${current}, now ${next})`,
+      );
+    } catch (err) {
+      // Non-fatal: don't break the order flow if totalSpent update fails
+      console.error('Error updating customer totalSpent:', err);
+    }
   }
 
   // ─────────────────────────────────────────
@@ -247,6 +452,9 @@ class OrderService {
           console.log(`✅ Order ${newOrder.orderId} added to customer's orders array`);
         }
 
+        // ✅ Auto-link the new order to the customer's chat thread
+        await this._autoLinkOrderToConversation(newOrder);
+
         return { success: true, message: "Order created successfully", data: newOrder };
       }
 
@@ -392,6 +600,12 @@ class OrderService {
             console.log(`✅ Order ${newOrder.orderId} added to customer's orders array (transaction)`);
           }
         });
+
+        // ✅ Auto-link AFTER the transaction commits (not inside it,
+        //    because chat writes are outside the session).
+        if (newOrder) {
+          await this._autoLinkOrderToConversation(newOrder);
+        }
       } catch (txnErr) {
         if (txnErr.handled) {
           txnResult = { success: false, message: txnErr.message };
@@ -532,6 +746,9 @@ class OrderService {
       });
       console.log(`✅ Order ${newOrder.orderId} added to customer's orders array (fallback)`);
     }
+
+    // ✅ Auto-link the new order to the customer's chat thread
+    await this._autoLinkOrderToConversation(newOrder);
 
     console.log("✅ Order created (no transaction):", newOrder.orderId);
     return { success: true, message: "Order created successfully", data: newOrder };
@@ -1075,6 +1292,9 @@ class OrderService {
       const order = await Order.findOne({ orderId });
       if (!order) return { success: false, message: 'Order not found' };
 
+      // ✅ Snapshot the paid amount before recording the downpayment
+      const paidBefore = this._computeTotalPaid(order);
+
       // Guards
       if (order.status !== 'Pending') {
         return { success: false, message: `Cannot confirm — order status is "${order.status}"` };
@@ -1141,6 +1361,13 @@ class OrderService {
             },
           }
         );
+      }
+
+      // ✅ Apply the totalSpent delta
+      const paidAfter = this._computeTotalPaid(order);
+      const delta = paidAfter - paidBefore;
+      if (delta !== 0) {
+        await this._applyTotalSpentDelta(order, delta);
       }
 
       return {
@@ -1352,6 +1579,11 @@ class OrderService {
         return { success: false, message: "Order not found" };
       }
 
+      // ✅ Snapshot the total paid BEFORE we touch partialPayments.
+      // After all branches run, we'll compute the delta and apply it
+      // to the customer's totalSpent.
+      const paidBefore = this._computeTotalPaid(order);
+
       if (partialPayments !== null && Array.isArray(partialPayments)) {
         order.partialPayments = partialPayments;
         const totalPaid = partialPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
@@ -1431,6 +1663,16 @@ class OrderService {
       if (user) order.updatedBy = user._id?.toString() || user.email || 'Admin';
 
       await order.save();
+
+      // ✅ Apply the totalSpent delta based on how much was paid before
+      // vs. after this update. Works for all cases: incremental payments,
+      // full payment transitions, and manual array replacements.
+      const paidAfter = this._computeTotalPaid(order);
+      const delta = paidAfter - paidBefore;
+
+      if (delta !== 0) {
+        await this._applyTotalSpentDelta(order, delta);
+      }
 
       return {
         success: true,
@@ -1536,6 +1778,9 @@ class OrderService {
         return { success: false, message: "Order not found" };
       }
 
+      // ✅ Snapshot the paid amount before the update
+      const paidBefore = this._computeTotalPaid(order);
+
       if (order.status !== "Out for Delivery") {
         const friendlyStatus =
           order.status === "Out for Delivery" && order.receivingMode === "Pick-up"
@@ -1601,6 +1846,13 @@ class OrderService {
       if (user) order.updatedBy = user._id?.toString() || user.email;
 
       await order.save();
+
+      // ✅ Apply the totalSpent delta
+      const paidAfter = this._computeTotalPaid(order);
+      const delta = paidAfter - paidBefore;
+      if (delta !== 0) {
+        await this._applyTotalSpentDelta(order, delta);
+      }
 
       return { success: true, data: order, message: "Order marked as received successfully" };
     } catch (error) {

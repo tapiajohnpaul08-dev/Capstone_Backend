@@ -8,6 +8,257 @@ const Supply = require('../models/Supply.Model');
 const InventoryItem = require('../models/InventoryItem.Model');
 
 // ─────────────────────────────────────────
+// ✅ NEW — GET /admin/summary
+//
+// Single-shot endpoint that returns everything the dashboard needs on
+// first paint: stats, revenue by category, weekly sales, low-stock items,
+// and recent orders. All aggregation happens in MongoDB.
+// ─────────────────────────────────────────
+router.get('/summary', verifyAdminToken, async (req, res) => {
+  try {
+    const now = new Date();
+
+    const startOfWeek = new Date(now);
+    startOfWeek.setDate(now.getDate() - 6);
+    startOfWeek.setHours(0, 0, 0, 0);
+
+    const [
+      orderStatsAgg,
+      revenueCategoryAgg,
+      weeklySalesAgg,
+      lowStockProductsAgg,
+      lowStockSuppliesAgg,
+      recentOrders,
+    ] = await Promise.all([
+      // ── 1. Order counts + completed revenue, one aggregate ─────
+      Order.aggregate([
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 },
+            revenue: {
+              $sum: {
+                $cond: [{ $eq: ['$status', 'Completed'] }, '$amount', 0],
+              },
+            },
+          },
+        },
+      ]),
+
+      // ── 2. Revenue by category, DB-side, top 8 ──────────────────
+      Order.aggregate([
+        { $match: { status: 'Completed', isProvided: false } },
+        { $unwind: '$items' },
+        {
+          $group: {
+            _id: { $ifNull: ['$items.category', 'Other'] },
+            revenue: { $sum: { $ifNull: ['$items.estimatedTotal', 0] } },
+            orders: { $sum: 1 },
+          },
+        },
+        { $sort: { revenue: -1 } },
+        { $limit: 8 },
+      ]),
+
+      // ── 3. Weekly sales, one aggregate ─────────────────────────
+      Order.aggregate([
+        {
+          $match: {
+            orderedAt: { $gte: startOfWeek },
+            status: 'Completed',
+          },
+        },
+        {
+          $group: {
+            _id: {
+              $dateToString: { format: '%Y-%m-%d', date: '$orderedAt' },
+            },
+            revenue: { $sum: '$amount' },
+          },
+        },
+      ]),
+
+      // ── 4. Low-stock products, DB-side, no full docs ───────────
+      Product.aggregate([
+        { $unwind: '$sizes' },
+        {
+          $match: {
+            'sizes.stock': { $gt: 0, $lte: 500 },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            id: '$id',
+            name: '$name',
+            category: '$category',
+            sizeName: '$sizes.name',
+            stock: '$sizes.stock',
+          },
+        },
+        { $sort: { stock: 1 } },
+        { $limit: 15 },
+      ]),
+
+      // ── 5. Low-stock supplies, DB-side, no full docs ───────────
+      InventoryItem.aggregate([
+        {
+          $match: {
+            itemType: 'supply',
+            stock: { $gt: 0, $lte: 100 },
+          },
+        },
+        {
+          $lookup: {
+            from: 'supplies',
+            localField: 'itemRef',
+            foreignField: '_id',
+            as: 'supply',
+          },
+        },
+        { $unwind: { path: '$supply', preserveNullAndEmptyArrays: true } },
+        {
+          $project: {
+            _id: 0,
+            itemId: '$itemId',
+            name: { $ifNull: ['$supply.name', 'Unknown Supply'] },
+            category: { $ifNull: ['$supply.category', 'other'] },
+            supplier: { $ifNull: ['$supply.supplier', 'No supplier'] },
+            stock: 1,
+            threshold: { $ifNull: ['$threshold', 100] },
+            unit: { $ifNull: ['$unit', 'units'] },
+          },
+        },
+        { $sort: { stock: 1 } },
+        { $limit: 15 },
+      ]),
+
+      // ── 6. Recent 5 orders, lean projection ────────────────────
+      Order.find({})
+        .sort({ orderedAt: -1 })
+        .limit(5)
+        .select(
+          'orderId customerName customerEmail customerPhone amount status paymentStatus receivingMode orderedAt productName quantity items',
+        )
+        .lean(),
+    ]);
+
+    // ── Shape stats ───────────────────────────────────────────────
+    const stats = {
+      totalOrders: 0,
+      pendingOrders: 0,
+      scheduledOrders: 0,
+      inProductionOrders: 0,
+      outForDeliveryOrders: 0,
+      completedOrders: 0,
+      cancelledOrders: 0,
+      totalRevenue: 0,
+    };
+
+    for (const row of orderStatsAgg) {
+      stats.totalOrders += row.count;
+      switch (row._id) {
+        case 'Pending':          stats.pendingOrders = row.count; break;
+        case 'Scheduled':        stats.scheduledOrders = row.count; break;
+        case 'In Production':    stats.inProductionOrders = row.count; break;
+        case 'Out for Delivery': stats.outForDeliveryOrders = row.count; break;
+        case 'Completed':
+          stats.completedOrders = row.count;
+          stats.totalRevenue = row.revenue;
+          break;
+        case 'Cancelled':        stats.cancelledOrders = row.count; break;
+      }
+    }
+
+    // ── Shape weekly sales (7 days, zero-filled) ─────────────────
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const weeklyMap = new Map(weeklySalesAgg.map((r) => [r._id, r.revenue]));
+    const weeklySales = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(now.getDate() - i);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const revenue = weeklyMap.get(key) || 0;
+      weeklySales.push({
+        day: dayNames[d.getDay()],
+        value: revenue,
+        displayValue: `${(revenue / 1000).toFixed(1)}k`,
+      });
+    }
+
+    // ── Shape low-stock items (merged, sorted, capped at 10) ─────
+    const lowStockItems = [
+      ...lowStockProductsAgg.map((p) => ({
+        id: p.id,
+        name: p.name,
+        stock: p.stock,
+        threshold: 500,
+        unit: 'pcs',
+        status: 'Low Stock',
+        type: 'product',
+        category: p.category,
+        sizeName: p.sizeName,
+      })),
+      ...lowStockSuppliesAgg.map((s) => ({
+        id: s.itemId,
+        name: s.name,
+        stock: s.stock,
+        threshold: s.threshold,
+        unit: s.unit,
+        status: 'Low Stock',
+        type: 'supply',
+        category: s.category,
+        supplier: s.supplier,
+      })),
+    ]
+      .sort((a, b) => a.stock - b.stock)
+      .slice(0, 10);
+
+    // ── Shape recent orders ───────────────────────────────────────
+    const formattedRecentOrders = recentOrders.map((o) => ({
+      id: o.orderId,
+      orderId: o.orderId,
+      customer: o.customerName || 'Guest',
+      email: o.customerEmail || 'N/A',
+      phone: o.customerPhone || 'N/A',
+      product:
+        o.productName || (o.items && o.items[0]?.name) || 'Custom Order',
+      qty: o.quantity || (o.items && o.items[0]?.quantity) || 0,
+      amount: `₱${(o.amount || 0).toLocaleString()}`,
+      rawAmount: o.amount || 0,
+      status: o.status || 'Pending',
+      payment: (o.paymentStatus || 'Unpaid').toLowerCase(),
+      deliveryMethod: o.receivingMode || 'Pick-up',
+      date: o.orderedAt
+        ? new Date(o.orderedAt).toLocaleDateString('en-PH', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+          })
+        : 'N/A',
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        stats,
+        revenueCategories: revenueCategoryAgg.map((r) => ({
+          name: r._id || 'Other',
+          revenue: Math.round(r.revenue),
+          orders: r.orders,
+        })),
+        weeklySales,
+        lowStockItems,
+        recentOrders: formattedRecentOrders,
+      },
+    });
+  } catch (error) {
+    console.error('Dashboard summary error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ─────────────────────────────────────────
 // GET DASHBOARD STATISTICS
 // ─────────────────────────────────────────
 router.get('/stats', verifyAdminToken, async (req, res) => {
