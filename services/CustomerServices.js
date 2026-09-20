@@ -365,15 +365,24 @@ async requestPasswordChangeOtp(email) {
       const salt = await bcrypt.genSalt(10);
       customer.password = await bcrypt.hash(newPassword, salt);
 
-    //   // If provider is OAuth (google/facebook), update provider to 'local'
-    //   if (customer.provider && customer.provider !== "local") {
-    //     customer.provider = "local";
-    //   }
+      // ✅ If the customer originally signed up via OAuth (Google/Facebook)
+      // and is now setting a password for the first time (or resetting it),
+      // flip their provider to 'local'. This means the Profile > Change
+      // Password page will start showing the "Current Password" field on
+      // the next visit — which is what we want, because they now HAVE one.
+      //
+      // Note: we do NOT clear providerId. That way we keep the linkage
+      // to their Google/Facebook identity in case we ever want to support
+      // "sign in with Google" alongside a password.
+      if (customer.provider && customer.provider !== 'local') {
+        console.log(
+          `🔄 Provider flip for ${customer.email}: ${customer.provider} → local`,
+        );
+        customer.provider = 'local';
+      }
 
+      customer.updatedAt = new Date();
       await customer.save();
-
-      // Clear OTP after successful password update
-      // The verifyOtp function already deletes or marks the OTP as used
 
       return {
         success: true,

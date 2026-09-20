@@ -62,11 +62,47 @@ class OrderController {
         if (order.data.orderedBy !== userId) {
             return res.status(403).json({ success: false, message: 'Access denied.' });
         }
-        const cancellableStatuses = ['Pending', 'Scheduled'];
+
+        // ✅ Include Confirmed — matches the frontend's cancellable set
+        const cancellableStatuses = ['Pending', 'Confirmed', 'Scheduled'];
         if (!cancellableStatuses.includes(order.data.status)) {
-            return res.status(400).json({ success: false, message: `Cannot cancel order in ${order.data.status} status.` });
+            return res.status(400).json({
+                success: false,
+                message: `Cannot cancel order in ${order.data.status} status.`,
+            });
         }
-        const response = await orderService.updateOrderStatus(orderId, 'Cancelled', 'Cancelled by customer', req.customer);
+
+        // ✅ Signature: (orderId, newStatus, notes, productionSchedule, driverId, user, options)
+        // req.customer belongs in the `user` slot (6th arg), NOT the 4th.
+        const response = await orderService.updateOrderStatus(
+            orderId,
+            'Cancelled',
+            'Cancelled by customer',
+            null,          // productionSchedule
+            null,          // driverId
+            req.customer,  // user — used for statusHistory.updatedBy
+            {},            // options — no codCollected for cancel
+        );
+
+        // Broadcast to any open admin views so inventory refreshes live
+        if (response.success) {
+            try {
+                const io = req.app.get('io');
+                if (io) {
+                    const Conversation = require('../models/Conversation.Model');
+                    const conv = await Conversation.findOne({ orderId });
+                    if (conv) {
+                        io.to(`conv_${conv.conversationId}`).emit(
+                            'order-negotiation-updated',
+                            response.data,
+                        );
+                    }
+                }
+            } catch (e) {
+                console.error('Emit cancel-by-customer error:', e);
+            }
+        }
+
         res.status(response.success ? 200 : 400).json(response);
     });
 

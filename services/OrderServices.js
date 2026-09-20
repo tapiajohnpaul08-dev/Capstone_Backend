@@ -904,18 +904,47 @@ class OrderService {
         }
       }
 
-      if (newStatus === "Cancelled" && order.status !== "Cancelled" && !order.isProvided) {
-        for (const item of order.items) {
-          if (item.productId) {
-            const product = await Product.findOne({ id: item.productId });
-            if (product) {
-              const sizeObj = product.sizes.find((s) => s.name === item.size);
-              if (sizeObj) {
-                sizeObj.stock += item.quantity;
-                await product.save();
-                console.log(`Inventory restored: +${item.quantity} to ${product.name} - ${item.size}`);
-              }
+      // ─── Restore stock on fresh cancellation ──────────────────────────
+      // Only company-product orders consume stock. Own-cups orders never
+      // touched the product's `sizes[].stock`, so there's nothing to restore.
+      if (
+        newStatus === "Cancelled" &&
+        order.status !== "Cancelled" &&
+        !order.isProvided
+      ) {
+        const items = Array.isArray(order.items) ? order.items : [];
+
+        for (const item of items) {
+          if (!item.productId || !item.size || !item.quantity) continue;
+
+          try {
+            // ✅ Atomic increment — no read-modify-write race
+            const updatedProduct = await Product.findOneAndUpdate(
+              { id: item.productId, "sizes.name": item.size },
+              {
+                $inc: { "sizes.$.stock": item.quantity },
+                $set: { updatedAt: new Date() },
+              },
+              { new: true },
+            );
+
+            if (updatedProduct) {
+              const restored = updatedProduct.sizes.find(
+                (s) => s.name === item.size,
+              );
+              console.log(
+                `↩️  Restored +${item.quantity} to ${updatedProduct.name} (${item.size}) — new stock: ${restored?.stock}`,
+              );
+            } else {
+              console.warn(
+                `⚠️ Cannot restore — product ${item.productId} / size ${item.size} not found`,
+              );
             }
+          } catch (err) {
+            console.error(
+              `❌ Stock restore failed for ${item.productId} (${item.size}):`,
+              err.message,
+            );
           }
         }
       }
