@@ -6,6 +6,7 @@ const brevo = new BrevoClient({
   apiKey: process.env.BREVO_API_KEY,
 });
 
+
 class MailService {
     constructor() {
         this.senderEmail = process.env.BREVO_EMAIL_USER;
