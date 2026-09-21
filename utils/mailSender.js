@@ -1,12 +1,10 @@
 // utils/mailSender.js
-const brevo = require('@getbrevo/brevo');
+const { BrevoClient } = require('@getbrevo/brevo');
 
 // ─── Brevo transactional email client ──────────────────────────────
-const brevoApiInstance = new brevo.TransactionalEmailsApi();
-brevoApiInstance.setApiKey(
-  brevo.TransactionalEmailsApiApiKeys.apiKey,
-  process.env.BREVO_API_KEY,
-);
+const brevo = new BrevoClient({
+  apiKey: process.env.BREVO_API_KEY,
+});
 
 class MailService {
     constructor() {
@@ -18,27 +16,28 @@ class MailService {
      * Shared low-level send via Brevo HTTP API.
      * Returns { success, message } so callers see the same shape as before.
      */
-    async _sendViaBrevo({ to, cc, subject, html, text }) {
+ async _sendViaBrevo({ to, cc, subject, html, text }) {
         try {
-            const sendSmtpEmail = new brevo.SendSmtpEmail();
-            sendSmtpEmail.subject = subject;
-            sendSmtpEmail.htmlContent = html;
-            if (text) sendSmtpEmail.textContent = text;
-            sendSmtpEmail.sender = { name: this.senderName, email: this.senderEmail };
-            sendSmtpEmail.to = Array.isArray(to)
-                ? to.map(e => ({ email: e }))
-                : [{ email: to }];
+            const payload = {
+                subject,
+                htmlContent: html,
+                sender: { name: this.senderName, email: this.senderEmail },
+                to: Array.isArray(to)
+                    ? to.map(e => ({ email: e }))
+                    : [{ email: to }],
+            };
+            if (text) payload.textContent = text;
             if (cc) {
                 const ccList = Array.isArray(cc) ? cc : [cc];
-                sendSmtpEmail.cc = ccList.filter(Boolean).map(e => ({ email: e }));
+                payload.cc = ccList.filter(Boolean).map(e => ({ email: e }));
             }
 
-            await brevoApiInstance.sendTransacEmail(sendSmtpEmail);
+            await brevo.transactionalEmails.sendTransacEmail(payload);
             return { success: true, message: 'Notification sent successfully' };
         } catch (error) {
-            const detail = error?.response?.body || error.message;
+            const detail = error?.message || JSON.stringify(error);
             console.error('❌ Brevo email failed:', detail);
-            return { success: false, message: typeof detail === 'string' ? detail : JSON.stringify(detail) };
+            return { success: false, message: detail };
         }
     }
 

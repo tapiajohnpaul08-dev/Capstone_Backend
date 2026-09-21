@@ -1,21 +1,16 @@
 // utils/otpUtils.js
 const bcrypt = require('bcrypt');
-const brevo = require('@getbrevo/brevo');
+const { BrevoClient } = require('@getbrevo/brevo');
 const Otp = require('../models/Otp.Model');
 
-// ─── Brevo transactional email client ──────────────────────────────
-const brevoApiInstance = new brevo.TransactionalEmailsApi();
-brevoApiInstance.setApiKey(
-  brevo.TransactionalEmailsApiApiKeys.apiKey,
-  process.env.BREVO_API_KEY,
-);
+// ─── Brevo client ───────────────────────────────────────────────────
+const brevo = new BrevoClient({
+  apiKey: process.env.BREVO_API_KEY,
+});
 
 const OTP_TTL_MINUTES = 10;
 const OTP_MAX_ATTEMPTS = 3;
 
-/**
- * Generate a random numeric OTP
- */
 const generateOtp = (length = 6) => {
   const digits = '0123456789';
   let otp = '';
@@ -26,7 +21,7 @@ const generateOtp = (length = 6) => {
 };
 
 /**
- * Send OTP email via Brevo's HTTP API (works on Render — no SMTP).
+ * Send OTP email via Brevo (v6 SDK).
  */
 const sendOtpEmail = async (email, otp) => {
   const html = `
@@ -42,24 +37,20 @@ const sendOtpEmail = async (email, otp) => {
   `;
 
   try {
-    const sendSmtpEmail = new brevo.SendSmtpEmail();
-    sendSmtpEmail.subject = 'Verify Your Email - OTP Code';
-    sendSmtpEmail.htmlContent = html;
-    sendSmtpEmail.textContent = `Your OTP for email verification is: ${otp}\n\nValid for ${OTP_TTL_MINUTES} minute(s).`;
-    sendSmtpEmail.sender = { name: 'ACAPHOP', email: process.env.BREVO_EMAIL_USER };
-    sendSmtpEmail.to = [{ email }];
-
-    await brevoApiInstance.sendTransacEmail(sendSmtpEmail);
+    await brevo.transactionalEmails.sendTransacEmail({
+      subject: 'Verify Your Email - OTP Code',
+      htmlContent: html,
+      textContent: `Your OTP for email verification is: ${otp}\n\nValid for ${OTP_TTL_MINUTES} minute(s).`,
+      sender: { name: 'ACAPHOP', email: process.env.BREVO_EMAIL_USER },
+      to: [{ email }],
+    });
     return true;
   } catch (error) {
-    console.error('❌ Brevo OTP email failed:', error?.response?.body || error.message);
+    console.error('❌ Brevo OTP email failed:', error?.message || error);
     return false;
   }
 };
 
-/**
- * Store OTP in MongoDB with hashed value + TTL expiry
- */
 const storeOtp = async (email, otp) => {
   const hashedOtp = await bcrypt.hash(otp, 10);
   const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
@@ -74,9 +65,6 @@ const storeOtp = async (email, otp) => {
   });
 };
 
-/**
- * Verify OTP
- */
 const verifyOtp = async (email, otp) => {
   const normalizedEmail = email.toLowerCase();
   const record = await Otp.findOne({ email: normalizedEmail });
@@ -108,9 +96,6 @@ const verifyOtp = async (email, otp) => {
   return { success: true, message: 'OTP verified successfully' };
 };
 
-/**
- * Send OTP to email (combined utility)
- */
 const sendOtp = async (email) => {
   const normalizedEmail = email.toLowerCase();
 
