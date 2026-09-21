@@ -1,20 +1,24 @@
 // utils/otpUtils.js
 const bcrypt = require('bcrypt');
-const brevo = require('@getbrevo/brevo');
+const nodemailer = require('nodemailer');
 const Otp = require('../models/Otp.Model');
 
-// ─── Brevo transactional email client ──────────────────────────────
-const brevoApiInstance = new brevo.TransactionalEmailsApi();
-brevoApiInstance.setApiKey(
-  brevo.TransactionalEmailsApiApiKeys.apiKey,
-  process.env.BREVO_API_KEY,
-);
+// ─── Email transporter ─────────────────────────────────────────────────
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
 
-const OTP_TTL_MINUTES = 10;
+const OTP_TTL_MINUTES = 10;        // must match the email copy below
 const OTP_MAX_ATTEMPTS = 3;
 
 /**
  * Generate a random numeric OTP
+ * @param {number} length - default 6
+ * @returns {string}
  */
 const generateOtp = (length = 6) => {
   const digits = '0123456789';
@@ -26,7 +30,7 @@ const generateOtp = (length = 6) => {
 };
 
 /**
- * Send OTP email via Brevo's HTTP API (works on Render — no SMTP).
+ * Send OTP email
  */
 const sendOtpEmail = async (email, otp) => {
   const html = `
@@ -42,17 +46,16 @@ const sendOtpEmail = async (email, otp) => {
   `;
 
   try {
-    const sendSmtpEmail = new brevo.SendSmtpEmail();
-    sendSmtpEmail.subject = 'Verify Your Email - OTP Code';
-    sendSmtpEmail.htmlContent = html;
-    sendSmtpEmail.textContent = `Your OTP for email verification is: ${otp}\n\nValid for ${OTP_TTL_MINUTES} minute(s).`;
-    sendSmtpEmail.sender = { name: 'ACAPHOP', email: process.env.BREVO_EMAIL_USER };
-    sendSmtpEmail.to = [{ email }];
-
-    await brevoApiInstance.sendTransacEmail(sendSmtpEmail);
+    await transporter.sendMail({
+      from: `"ACAPHOP" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: 'Verify Your Email - OTP Code',
+      html,
+      text: `Your OTP for email verification is: ${otp}\n\nValid for ${OTP_TTL_MINUTES} minute(s).`,
+    });
     return true;
   } catch (error) {
-    console.error('❌ Brevo OTP email failed:', error?.response?.body || error.message);
+    console.error('Email sending failed:', error);
     return false;
   }
 };
@@ -64,6 +67,7 @@ const storeOtp = async (email, otp) => {
   const hashedOtp = await bcrypt.hash(otp, 10);
   const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
 
+  // Delete any existing OTP for this email (only one active at a time)
   await Otp.deleteMany({ email: email.toLowerCase() });
 
   await Otp.create({
@@ -76,6 +80,7 @@ const storeOtp = async (email, otp) => {
 
 /**
  * Verify OTP
+ * @returns {Promise<{success: boolean, message: string}>}
  */
 const verifyOtp = async (email, otp) => {
   const normalizedEmail = email.toLowerCase();
@@ -85,6 +90,7 @@ const verifyOtp = async (email, otp) => {
     return { success: false, message: 'OTP not found or expired. Please request a new one.' };
   }
 
+  // MongoDB TTL will delete it, but we double-check in case of replication lag
   if (record.expiresAt < new Date()) {
     await Otp.deleteOne({ _id: record._id });
     return { success: false, message: 'OTP has expired. Please request a new one.' };
@@ -105,6 +111,8 @@ const verifyOtp = async (email, otp) => {
     return { success: false, message: `Invalid OTP. ${remaining} attempts remaining.` };
   }
 
+  // Valid → do NOT delete yet (register flow may need it again briefly).
+  // The register endpoint will call this and then proceed; expiry will clean up.
   return { success: true, message: 'OTP verified successfully' };
 };
 
@@ -114,6 +122,7 @@ const verifyOtp = async (email, otp) => {
 const sendOtp = async (email) => {
   const normalizedEmail = email.toLowerCase();
 
+  // Prevent spam: if a valid OTP was created less than 60s ago, reject
   const existing = await Otp.findOne({ email: normalizedEmail });
   if (existing && existing.createdAt) {
     const secondsSinceCreation = (Date.now() - existing.createdAt.getTime()) / 1000;
@@ -127,7 +136,7 @@ const sendOtp = async (email) => {
   }
 
   const otp = generateOtp(6);
-  console.log(`OTP for ${email}: ${otp}`);
+  console.log(`OTP for ${email}: ${otp}`); // For testing
 
   const emailSent = await sendOtpEmail(email, otp);
 

@@ -1,8 +1,6 @@
 "node_modules/" 
 "logs/" 
 
-# ".env" 
-# ".env.*" 
-# .env
+.env
 node_modules/
 logs/

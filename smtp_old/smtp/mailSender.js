@@ -1,45 +1,20 @@
 // utils/mailSender.js
-const brevo = require('@getbrevo/brevo');
-
-// ─── Brevo transactional email client ──────────────────────────────
-const brevoApiInstance = new brevo.TransactionalEmailsApi();
-brevoApiInstance.setApiKey(
-  brevo.TransactionalEmailsApiApiKeys.apiKey,
-  process.env.BREVO_API_KEY,
-);
+const nodemailer = require('nodemailer');
 
 class MailService {
     constructor() {
-        this.senderEmail = process.env.BREVO_EMAIL_USER;
-        this.senderName = 'ACAPS Trading Inventory';
+        this.transporter = null;
+        this.initTransporter();
     }
 
-    /**
-     * Shared low-level send via Brevo HTTP API.
-     * Returns { success, message } so callers see the same shape as before.
-     */
-    async _sendViaBrevo({ to, cc, subject, html, text }) {
-        try {
-            const sendSmtpEmail = new brevo.SendSmtpEmail();
-            sendSmtpEmail.subject = subject;
-            sendSmtpEmail.htmlContent = html;
-            if (text) sendSmtpEmail.textContent = text;
-            sendSmtpEmail.sender = { name: this.senderName, email: this.senderEmail };
-            sendSmtpEmail.to = Array.isArray(to)
-                ? to.map(e => ({ email: e }))
-                : [{ email: to }];
-            if (cc) {
-                const ccList = Array.isArray(cc) ? cc : [cc];
-                sendSmtpEmail.cc = ccList.filter(Boolean).map(e => ({ email: e }));
+    initTransporter() {
+        this.transporter = nodemailer.createTransport({
+            service: 'gmail',
+            auth: {
+                user: process.env.EMAIL_USER,
+                pass: process.env.EMAIL_PASS
             }
-
-            await brevoApiInstance.sendTransacEmail(sendSmtpEmail);
-            return { success: true, message: 'Notification sent successfully' };
-        } catch (error) {
-            const detail = error?.response?.body || error.message;
-            console.error('❌ Brevo email failed:', detail);
-            return { success: false, message: typeof detail === 'string' ? detail : JSON.stringify(detail) };
-        }
+        });
     }
 
     /**
@@ -55,32 +30,45 @@ class MailService {
             sizeName = null,
             category = '',
             itemId = '',
-            recipientEmail = process.env.COMPANY_EMAIL,
+            recipientEmail = process.env.COMPANY_EMAIL
         } = alertData;
 
         const isOutOfStock = currentStock === 0;
         const status = isOutOfStock ? 'OUT OF STOCK' : 'LOW STOCK';
         const statusColor = isOutOfStock ? '#dc2626' : '#eab308';
-
+        
         const subject = `${status} ALERT: ${itemName}${sizeName ? ` (${sizeName})` : ''}`;
-
+        
         const html = this.generateAlertHtml({
-            itemName, itemType, currentStock, threshold, unit,
-            sizeName, category, itemId, isOutOfStock, status, statusColor,
+            itemName,
+            itemType,
+            currentStock,
+            threshold,
+            unit,
+            sizeName,
+            category,
+            itemId,
+            isOutOfStock,
+            status,
+            statusColor
         });
 
-        const result = await this._sendViaBrevo({
-            to: recipientEmail,
-            cc: process.env.CC_EMAIL || null,
-            subject,
-            html,
-            text: this.generatePlainText(alertData),
-        });
-
-        if (result.success) {
+        try {
+            await this.transporter.sendMail({
+                from: `"Acaphop Inventory" <${process.env.EMAIL_USER}>`,
+                to: recipientEmail,
+                cc: process.env.CC_EMAIL || '',
+                subject: subject,
+                html: html,
+                text: this.generatePlainText(alertData)
+            });
+            
             console.log(`✅ Stock alert sent for ${itemName}${sizeName ? ` (${sizeName})` : ''}`);
+            return { success: true, message: 'Notification sent successfully' };
+        } catch (error) {
+            console.error('❌ Email sending failed:', error);
+            return { success: false, message: error.message };
         }
-        return result;
     }
 
     /**
@@ -93,33 +81,37 @@ class MailService {
 
         const lowStockItems = items.filter(i => i.currentStock > 0);
         const outOfStockItems = items.filter(i => i.currentStock === 0);
-
+        
         const html = this.generateBulkAlertHtml({
             lowStockItems,
             outOfStockItems,
             totalItems: items.length,
-            date: new Date(),
+            date: new Date()
         });
 
         const subject = `Inventory Alert: ${outOfStockItems.length} Out of Stock, ${lowStockItems.length} Low Stock Items`;
 
-        const result = await this._sendViaBrevo({
-            to: process.env.COMPANY_EMAIL,
-            cc: process.env.CC_EMAIL || null,
-            subject,
-            html,
-            text: `Out of Stock: ${outOfStockItems.length} items\nLow Stock: ${lowStockItems.length} items\n\nPlease check inventory dashboard.`,
-        });
-
-        if (result.success) {
+        try {
+            await this.transporter.sendMail({
+                from: `"Acaphop Inventory" <${process.env.EMAIL_USER}>`,
+                to: process.env.COMPANY_EMAIL,
+                cc: process.env.CC_EMAIL || '',
+                subject: subject,
+                html: html,
+                text: `Out of Stock: ${outOfStockItems.length} items\nLow Stock: ${lowStockItems.length} items\n\nPlease check inventory dashboard.`
+            });
+            
             console.log(`✅ Bulk stock alert sent for ${items.length} items`);
             return { success: true, message: 'Bulk notification sent successfully' };
+        } catch (error) {
+            console.error('❌ Bulk email failed:', error);
+            return { success: false, message: error.message };
         }
-        return result;
     }
 
     /**
-     * Send FULL inventory report
+     * Send FULL inventory report – lists ALL items (supplies, products, sizes)
+     * with their stock status (Out of Stock, Low Stock, In Stock)
      */
     async sendFullInventoryReport(items) {
         if (!items || items.length === 0) {
@@ -131,34 +123,48 @@ class MailService {
         const inStock = items.filter(i => i.status === 'In Stock');
 
         const html = this.generateFullReportHtml({
-            outOfStock, lowStock, inStock,
+            outOfStock,
+            lowStock,
+            inStock,
             totalItems: items.length,
-            date: new Date(),
+            date: new Date()
         });
 
         const subject = `Inventory Summary – ${outOfStock.length} Out, ${lowStock.length} Low, ${inStock.length} In Stock`;
 
-        const result = await this._sendViaBrevo({
-            to: process.env.COMPANY_EMAIL,
-            cc: process.env.CC_EMAIL || null,
-            subject,
-            html,
-            text: `Out of Stock: ${outOfStock.length}\nLow Stock: ${lowStock.length}\nIn Stock: ${inStock.length}\n\nFull inventory attached in HTML.`,
-        });
+        try {
+            await this.transporter.sendMail({
+                from: `"Acaphop Inventory" <${process.env.EMAIL_USER}>`,
+                to: process.env.COMPANY_EMAIL,
+                cc: process.env.CC_EMAIL || '',
+                subject: subject,
+                html: html,
+                text: `Out of Stock: ${outOfStock.length}\nLow Stock: ${lowStock.length}\nIn Stock: ${inStock.length}\n\nFull inventory attached in HTML.`
+            });
 
-        if (result.success) {
             console.log(`✅ Full inventory report sent with ${items.length} items`);
             return { success: true, message: 'Full report sent successfully' };
+        } catch (error) {
+            console.error('❌ Full report email failed:', error);
+            return { success: false, message: error.message };
         }
-        return result;
     }
 
-    // ---------- HTML GENERATORS (UNCHANGED) ----------
+    // ---------- HTML GENERATORS ----------
 
     generateAlertHtml(data) {
         const {
-            itemName, itemType, currentStock, threshold, unit,
-            sizeName, category, itemId, isOutOfStock, status, statusColor,
+            itemName,
+            itemType,
+            currentStock,
+            threshold,
+            unit,
+            sizeName,
+            category,
+            itemId,
+            isOutOfStock,
+            status,
+            statusColor
         } = data;
 
         return `
@@ -351,6 +357,9 @@ This is an automated notification from Acaphop Inventory System.
         `;
     }
 
+    /**
+     * Generate HTML for the full inventory report – simple tables, no emojis.
+     */
     generateFullReportHtml({ outOfStock, lowStock, inStock, totalItems, date }) {
         const dateStr = date ? new Date(date).toLocaleDateString('en-PH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : '';
         const timeStr = date ? new Date(date).toLocaleTimeString('en-PH') : '';
