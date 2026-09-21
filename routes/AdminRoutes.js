@@ -17,7 +17,7 @@ router.get('/allAdmins',          verifyAdminToken, AdminController.getAllAdmins
 router.get('/admin/:adminId',     verifyAdminToken, AdminController.getAdminById); 
 router.put('/admin/:adminId',     verifyAdminToken, AdminController.updateAdmin);
 
-router.delete('/admin/:adminId',  verifyAdminToken, checkRole('Sales'), AdminController.deleteAdmin);
+router.delete('/admin/:adminId',  verifyAdminToken, checkRole('Super Admin'), AdminController.deleteAdmin);
 
 // ─────────────────────────────────────────
 // CUSTOMER MANAGEMENT ROUTES (admin manages customers)

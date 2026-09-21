@@ -36,4 +36,25 @@ router.patch('/admin/orders/:orderId/payment', orderController.updatePaymentStat
 router.delete('/admin/orders/:orderId', orderController.deleteOrder);
 router.patch('/admin/orders/:orderId/negotiate', orderController.negotiateOrder);   // ← NEW
 router.post('/admin/orders/:orderId/confirm-with-downpayment', orderController.confirmWithDownpayment);
+
+// GET /api/v1/order/admin/counts
+// Fast, index-backed status counts for the sidebar badge
+router.get('/admin/counts', async (req, res, next) => {
+  try {
+    const Order = require('../models/Order.Model');
+    const [pending, inProduction, outForDelivery] = await Promise.all([
+      Order.countDocuments({ status: 'Pending' }),
+      Order.countDocuments({ status: 'In Production' }),
+      Order.countDocuments({
+        status: 'Out for Delivery',
+      }),
+    ]);
+    res.json({
+      success: true,
+      data: { pending, inProduction, outForDelivery },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 module.exports = router;

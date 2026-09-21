@@ -36,7 +36,7 @@ class AdminService {
         firstName: payload.firstName,
         middleName: payload.middleName || "",
         lastName: payload.lastName,
-        username: payload.username,
+        username: `${payload.firtName} ${payload.lastName}`,
         email: payload.email,
         password: hashedPassword,
         role: payload.role,
