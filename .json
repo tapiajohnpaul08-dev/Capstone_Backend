@@ -1,55 +1,74 @@
 {
-    "productId": "PRD-2026-174",
-    "name": "DOUBLE WALLPAPER CUPS",
-    "image": "https://res.cloudinary.com/vwrxijez/image/upload/v1785916841/beverage/products/product-1785916841196-184280702.jpg",
-    "category": "Paper Cups",
-    "size": "8oz",
-    "quantity": 500,
-    "printPlacement": "",
-    "printSize": "",
-    "designNotes": "",
-    "estimatedTotal": 1750,
+    "_id": "6a72ecd4854339361ebaefbd",
+    "id": "PRD-2026-318",
+    "name": "PET U-CUPS",
+    "category": "Plastic Cups",
+    "subcategory": "",
+    "description": "",
+    "image": "https://res.cloudinary.com/vwrxijez/image/upload/v1785916628/beverage/products/product-1785916625695-604870257.jpg",
+    "imagePublicId": "beverage/products/product-1785916625695-604870257",
     "sizes": [
         {
             "bulkPrices": {
-                "500": 1750,
-                "1000": 3500,
-                "2000": 7000,
-                "5000": 17500
-            },
-            "name": "8oz",
-            "price": 3.5,
-            "stock": 29000,
-            "_id": "6a72edab854339361ebaf056",
-            "rimDiameter": 90
-        },
-        {
-            "bulkPrices": {
-                "500": 2100,
-                "1000": 4200,
-                "2000": 8400,
-                "5000": 21000
+                "500": 1100,
+                "1000": 2200,
+                "2000": 4400,
+                "5000": 11000
             },
             "name": "12oz",
-            "price": 4.2,
-            "stock": 40000,
-            "_id": "6a72edab854339361ebaf057",
-            "rimDiameter": 90
+            "price": 2.2,
+            "stock": 46000,
+            "rimDiameter": 98,
+            "_id": "6ab29818850cfa49082621ff"
         },
         {
             "bulkPrices": {
-                "500": 2450,
-                "1000": 4900,
-                "2000": 9800,
-                "5000": 24500
+                "500": 1150,
+                "1000": 2300,
+                "2000": 4600,
+                "5000": 11500
             },
-            "name": "16oz",
-            "price": 4.9,
-            "stock": 47000,
-            "_id": "6a72edab854339361ebaf058",
-            "rimDiameter": 90
+            "name": "14oz",
+            "price": 2.3,
+            "stock": 50000,
+            "rimDiameter": 98,
+            "_id": "6ab29818850cfa4908262200"
+        },
+        {
+            "bulkPrices": {
+                "500": 1300,
+                "1000": 2600,
+                "2000": 5200,
+                "5000": 13000
+            },
+            "name": "18oz",
+            "price": 2.6,
+            "stock": 50000,
+            "rimDiameter": 98,
+            "_id": "6ab29818850cfa4908262201"
+        },
+        {
+            "bulkPrices": {
+                "500": 1350,
+                "1000": 2700,
+                "2000": 5400,
+                "5000": 13500
+            },
+            "name": "22oz",
+            "price": 2.7,
+            "stock": 50000,
+            "rimDiameter": 98,
+            "_id": "6ab29818850cfa4908262202"
         }
     ],
     "minOrder": 500,
-    "unitPrice": 3.5
+    "featured": false,
+    "popular": true,
+    "popularity": 0,
+    "revenue": 0,
+    "isActive": true,
+    "createdAt": "2026-08-05T07:57:08.844Z",
+    "updatedAt": "2026-09-22T15:00:40.498Z",
+    "__v": 1,
+    "enum": []
 }

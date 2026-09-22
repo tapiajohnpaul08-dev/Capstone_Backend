@@ -66,7 +66,7 @@ class ProductService {
       
       const newProduct = new Product({
         id: productId,
-        name: payload.name,
+        name: payload.name.toUpperCase(),
         category: payload.category,
         subcategory: payload.subcategory,
         image: imagePath,
@@ -105,9 +105,48 @@ class ProductService {
     // ─────────────────────────────────────────
     // GET ALL PRODUCTS
     // ─────────────────────────────────────────
+    // ─────────────────────────────────────────
     async getAllProducts() {
         try {
-            const products = await Product.find().sort({ id: 1 });
+            const products = await Product.aggregate([
+                {
+                    $addFields: {
+                        // Featured flag as a sortable number (1 = featured, 0 = not)
+                        _featuredRank: { $cond: [{ $eq: ['$featured', true] }, 1, 0] },
+                        // Popular flag as a sortable number
+                        _popularRank:  { $cond: [{ $eq: ['$popular', true] }, 1, 0] },
+                        // Browsing order for categories
+                        _categoryRank: {
+                            $switch: {
+                                branches: [
+                                    { case: { $eq: ['$category', 'Plastic Cups'] }, then: 1 },
+                                    { case: { $eq: ['$category', 'Paper Cups'] },   then: 2 },
+                                    { case: { $eq: ['$category', 'Containers'] },   then: 3 },
+                                    { case: { $eq: ['$category', 'Lids'] },         then: 4 },
+                                    { case: { $eq: ['$category', 'Bags'] },         then: 5 },
+                                    { case: { $eq: ['$category', 'Utensils'] },     then: 6 },
+                                    { case: { $eq: ['$category', 'Straws'] },       then: 7 },
+                                ],
+                                default: 99,
+                            },
+                        },
+                    },
+                },
+                {
+                    $sort: {
+                        _featuredRank: -1,      // featured first
+                        _popularRank:  -1,      // then popular
+                        _categoryRank:  1,      // then by browsing category order
+                        popularity:    -1,      // then by the popularity counter
+                        name:           1,      // finally alphabetically
+                    },
+                },
+                {
+                    // Clean up the helper fields before returning
+                    $unset: ['_featuredRank', '_popularRank', '_categoryRank'],
+                },
+            ]);
+
             return { success: true, data: products };
         } catch (error) {
             console.error('Error fetching products:', error);

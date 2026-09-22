@@ -105,7 +105,7 @@ router.get('/summary', verifyAdminToken, async (req, res) => {
         {
           $match: {
             itemType: 'supply',
-            stock: { $gt: 0, $lte: 100 },
+            stock: { $gt: 0, $lte: InventoryItem.threshold },
           },
         },
         {
@@ -434,8 +434,7 @@ router.get('/weekly-sales', verifyAdminToken, async (req, res) => {
 // ─────────────────────────────────────────
 router.get('/low-stock', verifyAdminToken, async (req, res) => {
   try {
-    const threshold = parseInt(req.query.threshold) || 100;
-    
+    const threshold = InventoryItem.threshold;
     // Get low stock products (checking sizes)
     const products = await Product.find({
       'sizes.stock': { $lt: threshold, $gt: 0 }
@@ -498,7 +497,7 @@ router.get('/sidebar-counts', verifyAdminToken, async (req, res) => {
       // 3. Low-stock SUPPLIES — same rule as /summary (1..100)
       InventoryItem.countDocuments({
         itemType: 'supply',
-        stock: { $gt: 0, $lte: 100 },
+        stock: { $gt: 0, $lte: InventoryItem.threshold },
       }),
 
       // 4. Pending negotiations — open/in_progress conversations whose
