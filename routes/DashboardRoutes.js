@@ -465,4 +465,96 @@ router.get('/low-stock', verifyAdminToken, async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────
+// ✅ NEW — GET /admin/sidebar-counts
+//
+// Single-shot endpoint that returns every count the sidebar badges need.
+// Uses the exact same queries/thresholds as /summary so the sidebar and
+// dashboard never disagree.
+// ─────────────────────────────────────────
+router.get('/sidebar-counts', verifyAdminToken, async (req, res) => {
+  try {
+    const Conversation = require('../models/Conversation.Model');
+    const Feedback = require('../models/Feedback.Model');
+
+    const [
+      pendingOrders,
+      lowStockProductsAgg,
+      lowStockSuppliesCount,
+      pendingNegotiationsAgg,
+      unreadAgg,
+      pendingFeedback,
+    ] = await Promise.all([
+      // 1. Pending orders — same rule as /summary stats.pendingOrders
+      Order.countDocuments({ status: 'Pending' }),
+
+      // 2. Low-stock PRODUCT SIZES — same rule as /summary (1..500)
+      Product.aggregate([
+        { $unwind: '$sizes' },
+        { $match: { 'sizes.stock': { $gt: 0, $lte: 500 } } },
+        { $count: 'count' },
+      ]),
+
+      // 3. Low-stock SUPPLIES — same rule as /summary (1..100)
+      InventoryItem.countDocuments({
+        itemType: 'supply',
+        stock: { $gt: 0, $lte: 100 },
+      }),
+
+      // 4. Pending negotiations — open/in_progress conversations whose
+      //    linked order is Pending + Unpaid (same rule as ChatService)
+      Conversation.aggregate([
+        {
+          $match: {
+            status: { $in: ['open', 'in_progress'] },
+            orderId: { $nin: [null, ''] },
+          },
+        },
+        {
+          $lookup: {
+            from: 'orders',
+            localField: 'orderId',
+            foreignField: 'orderId',
+            as: 'order',
+          },
+        },
+        { $unwind: '$order' },
+        {
+          $match: {
+            'order.status': 'Pending',
+            'order.paymentStatus': 'Unpaid',
+          },
+        },
+        { $count: 'count' },
+      ]),
+
+      // 5. Unread messages — sum of adminUnreadCount across all conversations
+      Conversation.aggregate([
+        { $group: { _id: null, total: { $sum: '$adminUnreadCount' } } },
+      ]),
+
+      // 6. Pending feedback
+      Feedback.countDocuments({ status: 'pending' }),
+    ]);
+
+    const lowStockProducts = lowStockProductsAgg[0]?.count || 0;
+    const pendingNegotiations = pendingNegotiationsAgg[0]?.count || 0;
+    const unreadMessages = unreadAgg[0]?.total || 0;
+
+    res.json({
+      success: true,
+      data: {
+        pendingOrders,
+        lowStockItems: lowStockProducts + lowStockSuppliesCount,
+        pendingNegotiations,
+        unreadMessages,
+        pendingFeedback,
+      },
+    });
+  } catch (error) {
+    console.error('Sidebar counts error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 module.exports = router;
