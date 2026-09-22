@@ -24,19 +24,19 @@ class ChatService {
   //   no orderId linked (or create one).
   async getOrCreateConversation(customerId, customerName, customerEmail, subject = '', orderId = null) {
     try {
-      // ✅ FIX — Normalize the customer name from the actual customer
-      // record so it doesn't matter what the caller passed. This ensures
-      // the conversation sidebar always shows the real name.
-      let resolvedName = customerName;
-      let resolvedEmail = customerEmail;
-
+      // Fetch the customer record
       const existingCustomer = await Customer.findOne({ customerId });
-      if (existingCustomer) {
-        const realName =
-          `${existingCustomer.firstName || ''} ${existingCustomer.lastName || ''}`.trim();
-        if (realName) resolvedName = realName;
-        if (!resolvedEmail) resolvedEmail = existingCustomer.email;
+
+      // Fetch the order (if any) so we can prefer its company name
+      let existingOrder = null;
+      if (orderId) {
+        existingOrder = await Order.findOne({ orderId }).lean();
       }
+
+      // Resolve the display name using the priority helper
+      const resolvedName = this._resolveCustomerName(existingOrder, existingCustomer);
+      const resolvedEmail =
+        existingCustomer?.email || customerEmail || '';
 
       let conversation = null;
 
@@ -153,9 +153,7 @@ class ChatService {
           const newConv = new Conversation({
             conversationId: await generateId('CONV'),
             customerId,
-            customerName:
-              `${customer.firstName || ''} ${customer.lastName || ''}`.trim() ||
-              customer.email,
+            customerName: this._resolveCustomerName(order, customer),
             customerEmail: customer.email,
             subject: `Order ${order.orderId}`,
             orderId: order.orderId,
@@ -231,9 +229,7 @@ class ChatService {
           await Conversation.create({
             conversationId: await generateId('CONV'),
             customerId: customer.customerId,
-            customerName:
-              `${customer.firstName || ''} ${customer.lastName || ''}`.trim() ||
-              customer.email,
+            customerName: this._resolveCustomerName(order, customer),
             customerEmail: customer.email,
             subject: `Order ${order.orderId}`,
             orderId: order.orderId,
@@ -523,6 +519,22 @@ async sendMessage(conversationId, senderId, senderName, senderType, content, att
         };
       }
 
+      // ✅ FIX — fetch the customer so _resolveCustomerName has both
+      //    order and customer to work with.
+      let customer = null;
+      if (order.orderedBy) {
+        try {
+          customer = await Customer.findById(order.orderedBy);
+        } catch {
+          customer = await Customer.findOne({ customerId: order.orderedBy });
+        }
+      }
+      if (!customer && order.customerEmail) {
+        customer = await Customer.findOne({
+          email: order.customerEmail.toLowerCase(),
+        });
+      }
+
       // ── Mark any previously-pending quote in this conversation as superseded
       await Message.updateMany(
         {
@@ -537,7 +549,7 @@ async sendMessage(conversationId, senderId, senderName, senderType, content, att
       // ── Snapshot the current order state into the quote
       const quoteData = {
         orderId: order.orderId,
-        customerName: order.customerName || 'Customer',
+        customerName: this._resolveCustomerName(order, customer),
         quantity: order.quantity,
         unitPrice: this._computeUnitPrice(order),
         designFee: order.designFee || 0,
@@ -755,6 +767,39 @@ async sendMessage(conversationId, senderId, senderName, senderType, content, att
     const first = order.items[0];
     if (!first.estimatedTotal || !first.quantity) return 0;
     return first.estimatedTotal / first.quantity;
+  }
+
+    // ─────────────────────────────────────────
+  // HELPER: resolve the display name for a customer
+  //
+  // Priority order:
+  //   1. order.customer.company         (company from the ORDER — e.g. "JCups")
+  //   2. customer.companyName           (company on the CUSTOMER account)
+  //   3. customer.firstName + lastName  (person's name)
+  //   4. customer.email                 (fallback)
+  //   5. 'Customer'                     (last resort)
+  // ─────────────────────────────────────────
+  _resolveCustomerName(order, customer) {
+    // 1. Company name from the order
+    const orderCompany = order?.customer?.company;
+    if (orderCompany && String(orderCompany).trim()) {
+      return String(orderCompany).trim();
+    }
+
+    // 2. Company name from the customer account
+    if (customer?.companyName && String(customer.companyName).trim()) {
+      return String(customer.companyName).trim();
+    }
+
+    // 3. First + last name
+    const fullName = `${customer?.firstName || ''} ${customer?.lastName || ''}`.trim();
+    if (fullName) return fullName;
+
+    // 4. Email
+    if (customer?.email) return customer.email;
+
+    // 5. Fallback
+    return 'Customer';
   }
 
 
