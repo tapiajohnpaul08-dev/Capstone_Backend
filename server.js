@@ -169,7 +169,7 @@ io.use(async (socket, next) => {
     if (!token) {
       return next(new Error('Authentication required'));
     }
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-jwt-secret-change-in-production');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     socket.userId = decoded.customerId || decoded.adminId || decoded.id;
     socket.userType = decoded.customerId ? 'customer' : 'admin';
     socket.userInfo = {

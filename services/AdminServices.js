@@ -36,8 +36,7 @@ class AdminService {
         firstName: payload.firstName,
         middleName: payload.middleName || "",
         lastName: payload.lastName,
-        username: `${payload.firtName} ${payload.lastName}`,
-        email: payload.email,
+        // username: payload.username?.trim() || `${payload.firstName} ${payload.lastName}`.trim().toLowerCase().replace(/\s+/g, '.'), email: payload.email,
         password: hashedPassword,
         role: payload.role,
       });
