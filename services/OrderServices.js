@@ -1428,6 +1428,75 @@ if (
     }
   }
 
+    // ─────────────────────────────────────────
+  // ✅ NEW — Update drop-off status only.
+  //
+  // Drop-off tracking is orthogonal to order status: an own-cups order
+  // sits at "Pending" while the customer brings their items in, and
+  // the admin flagging receipt of those items must NOT advance the
+  // status flow. This method touches nothing but `dropOffStatus`.
+  // ─────────────────────────────────────────
+  async updateDropOffStatus(orderId, dropOffStatus, user = null) {
+    try {
+      const VALID = ['Pending', 'Received']
+      if (!VALID.includes(dropOffStatus)) {
+        return { success: false, message: `Invalid dropOffStatus: ${dropOffStatus}` }
+      }
+
+      const order = await Order.findOne({ orderId })
+      if (!order) {
+        return { success: false, message: 'Order not found' }
+      }
+
+      // Only own-cups orders use drop-off tracking.
+      if (!order.isProvided) {
+        return {
+          success: false,
+          message: 'Drop-off tracking only applies to own-cups orders',
+        }
+      }
+
+      const adminName = user
+        ? user.firstName
+          ? `${user.firstName} ${user.lastName}`
+          : user.email || 'Admin'
+        : 'Admin'
+
+      const oldStatus = order.dropOffStatus
+      if (oldStatus === dropOffStatus) {
+        return { success: true, data: order, message: 'No change' }
+      }
+
+      order.dropOffStatus = dropOffStatus
+      order.updatedAt = new Date()
+      order.updatedBy = adminName
+
+      // Append a history entry so the timeline reflects the drop-off.
+      // NOTE: `status` is left as the current order status — we are not
+      // advancing the flow, just logging the event.
+      order.statusHistory.push({
+        status: order.status,
+        timestamp: new Date(),
+        notes:
+          dropOffStatus === 'Received'
+            ? 'Customer dropped off their items.'
+            : 'Drop-off status reset to Pending.',
+        updatedBy: adminName,
+      })
+
+      await order.save()
+
+      return {
+        success: true,
+        message: `Drop-off status updated to ${dropOffStatus}`,
+        data: order,
+      }
+    } catch (error) {
+      console.error('Error in updateDropOffStatus:', error)
+      throw error
+    }
+  }
+
   // ─────────────────────────────────────────
   // UPDATE ORDER
   // ─────────────────────────────────────────

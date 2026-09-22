@@ -106,6 +106,50 @@ class OrderController {
         res.status(response.success ? 200 : 400).json(response);
     });
 
+      // ─────────────────────────────────────────
+  // ✅ NEW — PATCH /order/admin/orders/:orderId/dropoff
+  // Updates ONLY the drop-off status. Does not touch the order status.
+  // ─────────────────────────────────────────
+  updateDropOffStatus = asyncTryCatch(async (req, res, next) => {
+    const { orderId } = req.params
+    const { dropOffStatus } = req.body
+    const user = req.admin
+
+    if (!dropOffStatus) {
+      return res.status(400).json({
+        success: false,
+        message: 'dropOffStatus is required',
+      })
+    }
+
+    const response = await orderService.updateDropOffStatus(
+      orderId,
+      dropOffStatus,
+      user,
+    )
+
+    // Emit a socket event so any other open tab refreshes.
+    if (response.success) {
+      try {
+        const io = req.app.get('io')
+        if (io) {
+          const Conversation = require('../models/Conversation.Model')
+          const conv = await Conversation.findOne({ orderId })
+          if (conv) {
+            io.to(`conv_${conv.conversationId}`).emit(
+              'order-negotiation-updated',
+              response.data,
+            )
+          }
+        }
+      } catch (e) {
+        console.error('Emit dropoff update error:', e)
+      }
+    }
+
+    res.status(response.success ? 200 : 400).json(response)
+  })
+
     getAllOrders = asyncTryCatch(async (req, res, next) => {
         const response = await orderService.getAllOrders(req.query);
         res.status(200).json(response);
