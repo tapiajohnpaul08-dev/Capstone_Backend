@@ -73,8 +73,12 @@ const io = socketIO(server, {
     credentials: true,
     methods: ['GET', 'POST']
   },
-  transports: ['websocket', 'polling']
+  transports: ['websocket', 'polling'],
 });
+// Expose io globally so services (OrderServices, etc.) can broadcast
+// without a circular require back to server.js.
+global.__io__ = io;
+
 
 // ─────────────────────────────────────────
 // SESSION MIDDLEWARE

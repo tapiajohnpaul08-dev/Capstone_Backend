@@ -150,6 +150,80 @@ class OrderController {
     res.status(response.success ? 200 : 400).json(response)
   })
 
+    // ─────────────────────────────────────────
+  // PATCH /order/admin/orders/:orderId/delay
+  // ─────────────────────────────────────────
+  reportDelay = asyncTryCatch(async (req, res, next) => {
+    const { orderId } = req.params;
+    const { category, reason, notes, newExpectedDelivery } = req.body;
+    const user = req.admin;
+
+    if (!reason || !String(reason).trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'A delay reason is required',
+      });
+    }
+
+    const response = await orderService.reportDelay(
+      orderId,
+      { category, reason, notes, newExpectedDelivery },
+      user,
+    );
+
+    // Broadcast to the linked conversation so other tabs update live
+    if (response.success) {
+      try {
+        const io = req.app.get('io');
+        if (io) {
+          const Conversation = require('../models/Conversation.Model');
+          const conv = await Conversation.findOne({ orderId });
+          if (conv) {
+            io.to(`conv_${conv.conversationId}`).emit(
+              'order-negotiation-updated',
+              response.data,
+            );
+          }
+        }
+      } catch (e) {
+        console.error('Emit reportDelay error:', e);
+      }
+    }
+
+    res.status(response.success ? 200 : 400).json(response);
+  });
+
+  // ─────────────────────────────────────────
+  // PATCH /order/admin/orders/:orderId/delay/resolve
+  // ─────────────────────────────────────────
+  resolveDelay = asyncTryCatch(async (req, res, next) => {
+    const { orderId } = req.params;
+    const user = req.admin;
+
+    const response = await orderService.resolveDelay(orderId, user);
+
+    if (response.success) {
+      try {
+        const io = req.app.get('io');
+        if (io) {
+          const Conversation = require('../models/Conversation.Model');
+          const conv = await Conversation.findOne({ orderId });
+          if (conv) {
+            io.to(`conv_${conv.conversationId}`).emit(
+              'order-negotiation-updated',
+              response.data,
+            );
+          }
+        }
+      } catch (e) {
+        console.error('Emit resolveDelay error:', e);
+      }
+    }
+
+    res.status(response.success ? 200 : 400).json(response);
+  });
+
+
     getAllOrders = asyncTryCatch(async (req, res, next) => {
         const response = await orderService.getAllOrders(req.query);
         res.status(200).json(response);

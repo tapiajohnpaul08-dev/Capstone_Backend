@@ -130,6 +130,44 @@ const pricingHistorySchema = new mongoose.Schema(
   { _id: false }
 );
 
+// ─── Delay tracking ─────────────────────────────────────────────────
+// Orthogonal to `status` — an order can be delayed at any stage.
+// Kept as an array so multiple delays are preserved as history.
+const delayInfoSchema = new mongoose.Schema(
+  {
+    isDelayed: { type: Boolean, default: false },
+    category: {
+      type: String,
+      enum: [
+        'material_shortage',
+        'production_issue',
+        'logistics',
+        'weather',
+        'customer_request',
+        'payment',
+        'other',
+      ],
+      default: 'other',
+    },
+    reason: { type: String, default: '' },   // customer-facing
+    notes:  { type: String, default: '' },   // admin-only
+
+    originalExpectedDelivery: { type: Date, default: null },
+    newExpectedDelivery:      { type: Date, default: null },
+
+    reportedBy: { type: String, default: '' },
+    reportedByType: {
+      type: String,
+      enum: ['admin', 'driver', 'system'],
+      default: 'admin',
+    },
+    reportedAt: { type: Date,   default: null },
+    resolvedAt: { type: Date,   default: null },
+    resolvedBy: { type: String, default: '' },
+  },
+  { _id: false }
+);
+
 const orderSchema = new mongoose.Schema({
   orderId: { type: String, unique: true },
   customerName: { type: String },
@@ -253,6 +291,7 @@ acceptedQuote: {
   notes: { type: String, default: "" },
   statusHistory: [statusHistorySchema],
   partialPayments: [partialPaymentSchema],
+  delayHistory: { type: [delayInfoSchema], default: [] },
   customer: {
     name: { type: String },
     company: { type: String, default: "" },
@@ -271,9 +310,21 @@ acceptedQuote: {
 });
 
 
-// ─── Indexes for frequently-queried fields ─────────────────────────────────
-// orderId already has a unique index via `unique: true` above.
-orderSchema.index({ customerEmail: 1 });
+// ─── Virtual: current delay state (derived) ─────────────────────────────
+orderSchema.virtual('isCurrentlyDelayed').get(function () {
+  const history = this.delayHistory || [];
+  const last = history[history.length - 1];
+  return !!(last && last.isDelayed);
+});
+
+orderSchema.virtual('currentDelay').get(function () {
+  const history = this.delayHistory || [];
+  const last = history[history.length - 1];
+  return last && last.isDelayed ? last : null;
+});
+
+orderSchema.index({ 'delayHistory.isDelayed': 1 });
+orderSchema.index({ 'delayHistory.reportedAt': -1 });
 orderSchema.index({ orderedBy: 1 });
 orderSchema.index({ status: 1 });
 orderSchema.index({ paymentStatus: 1 });

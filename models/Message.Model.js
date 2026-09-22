@@ -13,7 +13,7 @@ const messageSchema = new mongoose.Schema({
   content: { type: String, required: true },
   contentType: {
     type: String,
-    enum: ['text', 'image', 'file', 'system', 'quote', 'payment-request', 'payment-proof'],
+    enum: ['text', 'image', 'file', 'system', 'quote', 'payment-request', 'payment-proof', 'delay-notice'],
     default: 'text',
   },
 
@@ -54,6 +54,16 @@ const messageSchema = new mongoose.Schema({
     statusUpdatedAt: { type: Date, default: null },
     statusUpdatedBy: { type: String, default: '' },
     rejectionReason: { type: String, default: '' },
+  },
+
+    // ── Delay notice payload (only set when contentType === 'delay-notice') ──
+  delayNoticeData: {
+    orderId: { type: String, index: true, default: '' },
+    category: { type: String, default: 'other' },
+    reason: { type: String, default: '' },
+    originalExpectedDelivery: { type: Date, default: null },
+    newExpectedDelivery:      { type: Date, default: null },
+    reportedAt: { type: Date, default: null },
   },
 
   // ── Payment proof payload (only set when contentType === 'payment-proof') ──

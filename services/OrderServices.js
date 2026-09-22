@@ -1497,6 +1497,255 @@ if (
     }
   }
 
+  async reportDelay(orderId, payload, reporter, reporterType = 'admin') {
+    try {
+      const { category, reason, notes, newExpectedDelivery } = payload || {};
+
+      if (!reason || !String(reason).trim()) {
+        return { success: false, message: 'A delay reason is required' };
+      }
+
+      // ── Accept EITHER the human-readable orderId (ORD-2026-…) OR the
+      //    MongoDB _id. Driver endpoints send the mongo _id; admin
+      //    endpoints send the human-readable one.
+      const orderQuery = mongoose.isValidObjectId(orderId)
+        ? { $or: [{ orderId }, { _id: orderId }] }
+        : { orderId };
+
+      const order = await Order.findOne(orderQuery);
+      if (!order) {
+        return { success: false, message: 'Order not found' };
+      }
+
+      if (['Completed', 'Cancelled'].includes(order.status)) {
+        return {
+          success: false,
+          message: `Cannot mark a ${order.status.toLowerCase()} order as delayed`,
+        };
+      }
+
+      // ── Driver-specific guard rails ──────────────────────────────
+      if (reporterType === 'driver') {
+        // 1. Driver must own this order
+        if (order.driverDetails?.driverId !== reporter?.driverId) {
+          return { success: false, message: 'You are not assigned to this order' };
+        }
+        // 2. Driver can only report delays during Out for Delivery
+        if (order.status !== 'Out for Delivery') {
+          return {
+            success: false,
+            message: 'You can only report delays while the order is Out for Delivery',
+          };
+        }
+        // 3. Driver can only use logistics categories
+        const DRIVER_CATEGORIES = [
+          'logistics',
+          'weather',
+          'vehicle_breakdown',
+          'customer_unavailable',
+          'other',
+        ];
+        if (!DRIVER_CATEGORIES.includes(category)) {
+          return {
+            success: false,
+            message: `Drivers cannot use category "${category}"`,
+          };
+        }
+      }
+
+      const reporterName = reporter?.firstName
+        ? `${reporter.firstName} ${reporter.lastName || ''}`.trim()
+        : reporter?.email || (reporterType === 'driver' ? 'Driver' : 'Admin');
+      const reporterId =
+        reporter?._id?.toString() ||
+        reporter?.adminId ||
+        reporter?.driverId ||
+        'UNKNOWN';
+
+      // Prefix the reason so the customer knows it came from the road
+      const enrichedReason =
+        reporterType === 'driver'
+          ? `${String(reason).trim()} (reported by driver ${reporterName})`
+          : String(reason).trim();
+
+      // Preserve the ORIGINAL ETA across multiple delay events
+      const existingOriginal = order.delayHistory?.find(
+        (d) => d.originalExpectedDelivery,
+      )?.originalExpectedDelivery;
+      const originalETA = existingOriginal || order.expectedDelivery || null;
+
+      // Resolve any currently-active delay before starting a new one
+      (order.delayHistory || []).forEach((d) => {
+        if (d.isDelayed) {
+          d.isDelayed = false;
+          d.resolvedAt = new Date();
+          d.resolvedBy = reporterName;
+        }
+      });
+      // Append the new delay event
+      order.delayHistory.push({
+        isDelayed: true,
+        category: category || 'other',
+        reason: enrichedReason,
+        notes: notes || '',
+        originalExpectedDelivery: originalETA,
+        newExpectedDelivery: newExpectedDelivery
+          ? new Date(newExpectedDelivery)
+          : null,
+        reportedBy: reporterName,
+        reportedByType: reporterType,
+        reportedAt: new Date(),
+      });
+
+      // Reflect the new ETA on the order itself so receipts /
+      // dashboards always show reality.
+      if (newExpectedDelivery) {
+        order.expectedDelivery = new Date(newExpectedDelivery);
+      }
+
+      // Audit trail (same shape as statusHistory entries)
+      order.statusHistory.push({
+        status: order.status,
+        timestamp: new Date(),
+        notes: `Order delayed — ${enrichedReason}`,
+        updatedBy: reporterName,
+      });
+
+      order.updatedAt = new Date();
+      order.updatedBy = reporterName;
+      await order.save();
+
+      // ── Push a system message to the linked conversation ────────────
+      await this._pushDelayNoticeToChat(order, reporterName, reporterId);
+
+      return {
+        success: true,
+        message: 'Delay reported and customer notified',
+        data: order,
+      };
+    } catch (error) {
+      console.error('Error in reportDelay:', error);
+      throw error;
+    }
+  }
+
+  // ─────────────────────────────────────────
+  // RESOLVE DELAY — clear the active delay flag
+  // ─────────────────────────────────────────
+  async resolveDelay(orderId, admin) {
+    try {
+      const mongoose = require('mongoose');
+
+      // Accept EITHER the human-readable orderId (e.g. ORD-2026-0421)
+      // OR the MongoDB _id — the driver frontend sends the mongo _id.
+      const orderQuery = mongoose.isValidObjectId(orderId)
+        ? { $or: [{ orderId }, { _id: orderId }] }
+        : { orderId };
+
+      const order = await Order.findOne(orderQuery);
+      if (!order) {
+        return { success: false, message: 'Order not found' };
+      }
+
+      const hasActive = (order.delayHistory || []).some((d) => d.isDelayed);
+      if (!hasActive) {
+        return { success: false, message: 'Order is not currently delayed' };
+      }
+
+      const adminName = admin?.firstName
+        ? `${admin.firstName} ${admin.lastName}`
+        : admin?.email || 'Admin';
+
+      order.delayHistory.forEach((d) => {
+        if (d.isDelayed) {
+          d.isDelayed = false;
+          d.resolvedAt = new Date();
+          d.resolvedBy = adminName;
+        }
+      });
+
+      order.statusHistory.push({
+        status: order.status,
+        timestamp: new Date(),
+        notes: 'Delay resolved — order back on track',
+        updatedBy: adminName,
+      });
+
+      order.updatedAt = new Date();
+      order.updatedBy = adminName;
+      await order.save();
+
+      return {
+        success: true,
+        message: 'Delay resolved',
+        data: order,
+      };
+    } catch (error) {
+      console.error('Error in resolveDelay:', error);
+      throw error;
+    }
+  }
+
+  // ─────────────────────────────────────────
+  // HELPER: push a delay-notice system message
+  // ─────────────────────────────────────────
+  async _pushDelayNoticeToChat(order, adminName, adminId) {
+    try {
+      const Conversation = require('../models/Conversation.Model');
+      const Message = require('../models/Message.Model');
+      const generateId = require('../utils/generateId');
+
+      const conversation = await Conversation.findOne({ orderId: order.orderId });
+      if (!conversation) return;
+
+      const lastDelay = order.delayHistory[order.delayHistory.length - 1];
+
+      const notice = new Message({
+        messageId: await generateId('MSG'),
+        conversationId: conversation.conversationId,
+        senderType: 'admin',
+        senderId: adminId,
+        senderName: adminName,
+        content: `⚠️ Order ${order.orderId} delayed — ${lastDelay.reason}`,
+        contentType: 'delay-notice',
+        delayNoticeData: {
+          orderId: order.orderId,
+          category: lastDelay.category,
+          reason: lastDelay.reason,
+          originalExpectedDelivery: lastDelay.originalExpectedDelivery,
+          newExpectedDelivery: lastDelay.newExpectedDelivery,
+          reportedAt: lastDelay.reportedAt,
+        },
+        isDeleted: false,
+        createdAt: new Date(),
+      });
+      await notice.save();
+
+      conversation.lastMessage = `⚠️ Delay notice: ${lastDelay.reason}`;
+      conversation.lastMessageAt = new Date();
+      conversation.lastMessageBy = 'admin';
+      conversation.customerUnreadCount += 1;
+      conversation.adminUnreadCount = 0;
+      await conversation.save();
+
+      // Broadcast via socket if available
+      try {
+        const io = global.__io__;
+        if (io) {
+          io.to(`conv_${conversation.conversationId}`).emit('new-message', notice.toObject());
+        }
+      } catch (e) {
+        // Non-fatal
+      }
+
+      console.log(`📢 Delay notice pushed to ${conversation.conversationId}`);
+    } catch (err) {
+      // Never break the delay flow over a chat failure
+      console.error('_pushDelayNoticeToChat failed:', err);
+    }
+  }
+
+
   // ─────────────────────────────────────────
   // UPDATE ORDER
   // ─────────────────────────────────────────

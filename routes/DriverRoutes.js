@@ -56,12 +56,19 @@ router.patch('/:driverId/toggle-availability', verifyDriverToken, DriverControll
 router.get('/orders/assigned', verifyDriverToken, DriverController.getAssignedOrders);
 router.get('/orders/history', verifyDriverToken, DriverController.getOrderHistory);
 
-// ✅ FIX: Reorder middleware - Authenticate FIRST, then handle file upload
+// Update order status (upload proof of delivery + mark completed)
 router.patch(
     '/orders/:orderId/status',
     verifyDriverToken,              // 1. Authenticate first
     upload.single('proofOfDelivery'), // 2. Then handle file upload
     DriverController.updateOrderStatus // 3. Then the controller
+);
+
+// ✅ NEW — Driver reports a delay on their own out-for-delivery order
+router.patch(
+    '/orders/:orderId/delay',
+    verifyDriverToken,
+    DriverController.reportDelay,
 );
 
 // ============ ADMIN ONLY ROUTES ============

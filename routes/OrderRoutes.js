@@ -37,6 +37,8 @@ router.delete('/admin/orders/:orderId', orderController.deleteOrder);
 router.patch('/admin/orders/:orderId/negotiate', orderController.negotiateOrder);   // ← NEW
 router.post('/admin/orders/:orderId/confirm-with-downpayment', orderController.confirmWithDownpayment);
 router.patch('/admin/orders/:orderId/dropoff', orderController.updateDropOffStatus) 
+router.patch('/admin/orders/:orderId/delay',         orderController.reportDelay)
+router.patch('/admin/orders/:orderId/delay/resolve', orderController.resolveDelay)
 // GET /api/v1/order/admin/counts
 // Fast, index-backed status counts for the sidebar badge
 router.get('/admin/counts', async (req, res, next) => {

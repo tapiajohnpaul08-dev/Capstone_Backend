@@ -161,6 +161,53 @@ class DriverController {
         res.status(status).json(response);
     });
 
+        // ─────────────────────────────────────────
+    // PATCH /drivers/orders/:orderId/delay
+    // Driver-reported delay during delivery
+    // ─────────────────────────────────────────
+    reportDelay = asyncTryCatch(async (req, res, next) => {
+      const { orderId } = req.params;
+      const { category, reason, notes, newExpectedDelivery } = req.body;
+      const driver = req.user;   // set by verifyDriverToken
+
+      if (!reason || !String(reason).trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'A delay reason is required',
+        });
+      }
+
+      const OrderService = require('../services/OrderServices');
+      const response = await OrderService.reportDelay(
+        orderId,
+        { category, reason, notes, newExpectedDelivery },
+        driver,
+        'driver',
+      );
+
+      // Broadcast to the linked conversation (if any) so the customer's
+      // chat updates live without a refresh.
+      if (response.success) {
+        try {
+          const io = req.app.get('io');
+          if (io) {
+            const Conversation = require('../models/Conversation.Model');
+            const conv = await Conversation.findOne({ orderId });
+            if (conv) {
+              io.to(`conv_${conv.conversationId}`).emit(
+                'order-negotiation-updated',
+                response.data,
+              );
+            }
+          }
+        } catch (e) {
+          console.error('Emit driver reportDelay error:', e);
+        }
+      }
+
+      res.status(response.success ? 200 : 400).json(response);
+    });
+
     getDriverStats = asyncTryCatch(async (req, res, next) => {
         const response = await driverService.getDriverStats();
         res.status(200).json(response);
