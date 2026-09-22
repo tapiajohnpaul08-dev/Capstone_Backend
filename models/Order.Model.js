@@ -56,6 +56,16 @@ const orderItemSchema = new mongoose.Schema({
   },
   estimatedTotal: { type: Number, default: 0 },
   image: { type: String },
+
+  // ✅ NEW — snapshot of rim diameter at time of order.
+  rimDiameter: { type: Number, default: null },
+
+  // ✅ NEW — item kind for filtering & reporting.
+  itemType: {
+    type: String,
+    enum: ['cup', 'lid', 'container', 'bag', 'utensil', 'straw', 'other'],
+    default: 'cup',
+  },
 });
 
 const statusHistorySchema = new mongoose.Schema(

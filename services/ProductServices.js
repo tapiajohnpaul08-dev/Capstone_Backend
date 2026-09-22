@@ -59,7 +59,9 @@ class ProductService {
         name: size.name,
         price: size.price,
         stock: size.stock || 0,
-        bulkPrices: size.bulkPrices || {}
+        bulkPrices: size.bulkPrices || {},
+        rimDiameter: size.rimDiameter ?? null,     // ← ADD
+
       }));
       
       const newProduct = new Product({
@@ -174,7 +176,9 @@ class ProductService {
           name: size.name,
           price: size.price,
           stock: size.stock || 0,
-          bulkPrices: size.bulkPrices || {}
+          bulkPrices: size.bulkPrices || {},
+            rimDiameter: size.rimDiameter ?? null,   // ✅ ADD
+
         }));
         updateData.sizes = processedSizes;
       }

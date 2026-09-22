@@ -527,6 +527,9 @@ class OrderService {
               selectedTemplateId: item.selectedTemplateId || null,
               estimatedTotal: itemTotal,
               image: product.image,
+               // ✅ NEW
+  rimDiameter: item.rimDiameter ?? sizeObj.rimDiameter ?? null,
+  itemType: item.itemType || 'cup',
             });
 
             sizeObj.stock -= item.quantity;
@@ -657,6 +660,18 @@ class OrderService {
         };
       }
 
+      // ✅ NEW — reject mismatched rimDiameter from tampered payloads
+if (
+  item.rimDiameter != null &&
+  sizeObj.rimDiameter != null &&
+  item.rimDiameter !== sizeObj.rimDiameter
+) {
+  throw Object.assign(
+    new Error(`Rim diameter mismatch for ${item.name} - ${item.size}`),
+    { handled: true },
+  );
+}
+
       const unitPrice = this._getUnitPriceForQuantity(sizeObj, item.quantity);
       const itemTotal = unitPrice * item.quantity;
       productTotal += itemTotal;
@@ -679,6 +694,9 @@ class OrderService {
         selectedTemplateId: item.selectedTemplateId || null,
         estimatedTotal: itemTotal,
         image: product.image,
+                // ✅ NEW — mirror the transaction path
+        rimDiameter: item.rimDiameter ?? sizeObj.rimDiameter ?? null,
+        itemType: item.itemType || 'cup',
       });
 
       sizeObj.stock -= item.quantity;

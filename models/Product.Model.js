@@ -10,15 +10,30 @@ const sizeSchema = new mongoose.Schema({
         1000: { type: Number, default: null },
         2000: { type: Number, default: null },
         5000: { type: Number, default: null }
-    }
+    },
+    rimDiameter: { type: Number, default: null },
 });
 
 const productSchema = new mongoose.Schema({
     id: { type: String, required: true, unique: true },
     name: { type: String, required: true },
-    category: { type: String, required: true },
+
+    // ✅ Restored — category field with enum validation
+    category: {
+        type: String,
+        required: true,
+        enum: [
+            'Plastic Cups',
+            'Paper Cups',
+            'Containers',
+            'Bags',
+            'Utensils',
+            'Straws',
+            'Lids',
+        ],
+    },
+
     subcategory: { type: String, default: '' },
-    description: { type: String, default: '' },
     image: { type: String, required: true }, // Stores relative path like '/uploads/products/product-xxx.jpg'    
     imagePublicId: { type: String, default: null }, // Cloudinary public ID
 
