@@ -10,6 +10,7 @@ const generateId = require("../utils/generateItemId");
 
 const Message = require('../models/Message.Model');
 
+const { emitOrderChanged, emitInventoryChanged } = require('../utils/realtime');
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 const DESIGN_AND_PRINTING_FEE = 500;
@@ -277,16 +278,19 @@ class OrderService {
         return;
       }
 
-      // Prevent going below 0 (safety net for edge cases)
-      const current = Number(customer.totalSpent) || 0;
-      const next = Math.max(0, current + delta);
-
-      customer.totalSpent = next;
-      customer.updatedAt = new Date();
-      await customer.save();
+      // ✅ Atomic increment — avoids a read-modify-write race when two
+      // payment events land in parallel (e.g. downpayment verified while
+      // an order is being marked Completed in another tab).
+      const result = await Customer.updateOne(
+        { _id: customer._id },
+        {
+          $inc: { totalSpent: delta },
+          $set: { updatedAt: new Date() },
+        },
+      );
 
       console.log(
-        `💰 totalSpent ${delta > 0 ? '+' : ''}${delta} for ${customer.email} (was ${current}, now ${next})`,
+        `💰 totalSpent ${delta > 0 ? '+' : ''}${delta} applied for ${customer.email} (matched ${result.matchedCount}, modified ${result.modifiedCount})`,
       );
     } catch (err) {
       // Non-fatal: don't break the order flow if totalSpent update fails
@@ -455,6 +459,10 @@ class OrderService {
         // ✅ Auto-link the new order to the customer's chat thread
         await this._autoLinkOrderToConversation(newOrder);
 
+        // ✅ Realtime — notify admins + the customer
+        emitOrderChanged(newOrder, 'created');
+        emitInventoryChanged({ reason: 'order-created', orderId: newOrder.orderId });
+
         return { success: true, message: "Order created successfully", data: newOrder };
       }
 
@@ -608,6 +616,8 @@ class OrderService {
         //    because chat writes are outside the session).
         if (newOrder) {
           await this._autoLinkOrderToConversation(newOrder);
+          emitOrderChanged(newOrder, 'created');
+          emitInventoryChanged({ reason: 'order-created', orderId: newOrder.orderId });
         }
       } catch (txnErr) {
         if (txnErr.handled) {
@@ -767,7 +777,8 @@ if (
 
     // ✅ Auto-link the new order to the customer's chat thread
     await this._autoLinkOrderToConversation(newOrder);
-
+    emitOrderChanged(newOrder, 'created');
+    emitInventoryChanged({ reason: 'order-created', orderId: newOrder.orderId });
     console.log("✅ Order created (no transaction):", newOrder.orderId);
     return { success: true, message: "Order created successfully", data: newOrder };
   }
@@ -823,7 +834,7 @@ if (
         return { success: false, message: "Invalid status" };
       }
 
-      const order = await Order.findOne({ orderId });
+      let order = await Order.findOne({ orderId });
       if (!order) {
         return { success: false, message: "Order not found" };
       }
@@ -848,9 +859,25 @@ if (
           };
         }
 
-        // Flip to Paid — updatePaymentStatus (FIX #1a) records the
-        // remaining balance in partialPayments.
-        await this.updatePaymentStatus(orderId, "Paid", order.totalAmount, user);
+        // Flip to Paid — updatePaymentStatus records the remaining
+        // balance in partialPayments.
+        const paymentResult = await this.updatePaymentStatus(
+          orderId, "Paid", order.totalAmount, user
+        );
+
+        // ✅ CRITICAL — Replace our local `order` with the FRESH doc that
+        // updatePaymentStatus loaded + saved. That doc has:
+        //   • the current __v (incremented by the inner save)
+        //   • the updated paymentStatus / partialPayments / paymentDetails
+        //
+        // Without replacing the doc, our final order.save() at the end of
+        // this function would try to write against a stale __v and throw
+        // a Mongoose VersionError — which aborts the status change
+        // entirely (order remains "Out for Delivery" in the DB even
+        // though the driver clicked Complete).
+        if (paymentResult.success && paymentResult.data) {
+          order = paymentResult.data;
+        }
       }
 
       if (order.status === "Completed" || order.status === "Cancelled") {
@@ -1033,6 +1060,12 @@ if (
 
       await order.save();
 
+      // ✅ Realtime
+      emitOrderChanged(order, 'status');
+      if (newStatus === 'Cancelled') {
+        emitInventoryChanged({ reason: 'order-cancelled', orderId: order.orderId });
+      }
+
       return {
         success: true,
         message: `Order status updated from ${oldStatus} to ${newStatus}`,
@@ -1061,7 +1094,7 @@ if (
   // ─────────────────────────────────────────
   async negotiateOrder(orderId, updates, admin) {
     try {
-      const order = await Order.findOne({ orderId });
+      let order = await Order.findOne({ orderId });
       if (!order) {
         return { success: false, message: "Order not found" };
       }
@@ -1145,6 +1178,22 @@ if (
           order.quantity = newQty;
           if (order.items?.[0]) {
             order.items[0].quantity = newQty;
+
+            // ── If the admin did NOT explicitly override unitPrice in this
+            // same request, keep the effective per-unit price constant and
+            // recalculate the item subtotal. Without this, a quantity-only
+            // change (e.g. 500 → 1000) would leave estimatedTotal stale.
+            const hasUnitPriceOverride =
+              updates.unitPrice !== undefined &&
+              updates.unitPrice !== null &&
+              updates.unitPrice !== '';
+
+            if (!hasUnitPriceOverride && oldQty > 0) {
+              const existingUnitPrice =
+                (order.items[0].estimatedTotal || 0) / oldQty;
+              order.items[0].estimatedTotal =
+                Number((existingUnitPrice * newQty).toFixed(2));
+            }
           }
 
           historyEntries.push({
@@ -1292,15 +1341,8 @@ if (
         order.pricingHistory.push(...historyEntries);
         order.updatedAt = new Date();
         order.updatedBy = adminName;
-
-        // order.statusHistory.push({
-        //   status: "Pending",
-        //   timestamp: new Date(),
-        //   notes: `Pricing negotiated: ${historyEntries
-        //     .map((h) => `${h.field} ${h.oldValue}→${h.newValue}`)
-        //     .join(", ")}`,
-        //   updatedBy: adminName,
-        // });
+        
+        await order.save();
 
         await order.save();
       }
@@ -1396,6 +1438,9 @@ if (
 
       await order.save();
 
+      // ✅ Realtime
+      emitOrderChanged(order, 'confirmed');
+
       // Mark linked payment-request message as verified
       if (paymentRequestMessageId) {
         await Message.updateOne(
@@ -1485,6 +1530,9 @@ if (
       })
 
       await order.save()
+
+      // ✅ Realtime
+      emitOrderChanged(order, 'dropoff')
 
       return {
         success: true,
@@ -1615,6 +1663,9 @@ if (
       order.updatedBy = reporterName;
       await order.save();
 
+      // ✅ Realtime
+      emitOrderChanged(order, 'delayed');
+
       // ── Push a system message to the linked conversation ────────────
       await this._pushDelayNoticeToChat(order, reporterName, reporterId);
 
@@ -1674,6 +1725,9 @@ if (
       order.updatedAt = new Date();
       order.updatedBy = adminName;
       await order.save();
+
+      // ✅ Realtime
+      emitOrderChanged(order, 'delay-resolved');
 
       return {
         success: true,
@@ -1755,7 +1809,7 @@ if (
       delete updateData.orderId;
       delete updateData.orderedAt;
 
-      const order = await Order.findOne({ orderId });
+      let order = await Order.findOne({ orderId });
       if (!order) {
         return { success: false, message: "Order not found" };
       }
@@ -1841,6 +1895,16 @@ if (
       }
 
       await Order.findOneAndDelete({ orderId });
+
+      // ✅ Realtime — broadcast the deletion to admins
+      if (global.__io__) {
+        global.__io__.to('admins').emit('order:changed', {
+          orderId,
+          action: 'deleted',
+          timestamp: new Date().toISOString(),
+        });
+      }
+      emitInventoryChanged({ reason: 'order-deleted', orderId });
 
       return { success: true, message: "Order deleted successfully", data: { orderId, status: order.status } };
     } catch (error) {
@@ -2028,6 +2092,9 @@ if (
       if (user) order.updatedBy = user._id?.toString() || user.email || 'Admin';
 
       await order.save();
+
+      // ✅ Realtime
+      emitOrderChanged(order, 'payment');
 
       // ✅ Apply the totalSpent delta based on how much was paid before
       // vs. after this update. Works for all cases: incremental payments,

@@ -229,6 +229,20 @@ class ChatController {
       io.to(`conv_${conversationId}`).emit('payment-request-updated', response.requestMessage);
       io.to(`conv_${conversationId}`).emit('new-message', response.systemMessage);
 
+            // ✅ Notify all admins + the customer that the payment state changed
+      try {
+        const { emitOrderChanged } = require('../utils/realtime');
+        const Order = require('../models/Order.Model');
+        const updatedOrder = await Order.findOne({
+          orderId: response.data.paymentProofData.orderId,
+        });
+        if (updatedOrder) {
+          emitOrderChanged(updatedOrder, 'payment-rejected');
+        }
+      } catch (e) {
+        console.error('rejectPaymentProof: emitOrderChanged failed:', e.message);
+      }
+
       // ✅ NEW: fetch the updated order and emit so the NegotiationPanel
       // re-enables "Send Payment Details" after the rejection
       try {
@@ -303,6 +317,16 @@ class ChatController {
     if (io) {
       io.to(`conv_${conversationId}`).emit('payment-proof-updated', proofMsg);
       io.to(`conv_${conversationId}`).emit('order-negotiation-updated', result.data);
+    }
+
+    // ✅ Broadcast to all admins + the customer so the sidebar count,
+    //    the Orders list and the customer's order detail page all
+    //    pick up the Confirmed status change instantly.
+    try {
+      const { emitOrderChanged } = require('../utils/realtime');
+      emitOrderChanged(result.data, 'confirmed');
+    } catch (e) {
+      console.error('verifyPaymentProof: emitOrderChanged failed:', e.message);
     }
 
     res.status(200).json({ success: true, data: result.data, proof: proofMsg });

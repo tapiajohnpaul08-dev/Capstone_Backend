@@ -6,8 +6,7 @@ class FeedbackController {
     // ─── Create Feedback ──────────────────────────────────────────────────
     async createFeedback(req, res) {
         try {
-            const result = await FeedbackService.createFeedback(req.body, req.user);
-            
+            const result = await FeedbackService.createFeedback(req.body, req.customer);            
             if (!result.success) {
                 return res.status(400).json(result);
             }
@@ -32,10 +31,10 @@ class FeedbackController {
     }
 
     // ─── Get Customer's Feedback ──────────────────────────────────────────
-    async getMyFeedback(req, res) {
-        try {
-            const result = await FeedbackService.getFeedbackByCustomer(req.user._id);
-            res.json(result);
+async getMyFeedback(req, res) {
+    try {
+        const result = await FeedbackService.getFeedbackByCustomer(req.customer._id);
+        res.json(result);
         } catch (error) {
             console.error('Error getting customer feedback:', error);
             res.status(500).json({ success: false, message: 'Server error' });

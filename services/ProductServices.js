@@ -1,6 +1,6 @@
 const Product = require('../models/Product.Model');
 const generateId = require('../utils/generateItemId');
-
+const { emitInventoryChanged } = require('../utils/realtime');
 const InventoryItemService = require('./InventoryItemServices');
 const { getPublicId, deleteImage, getOptimizedUrl } = require('../config/multer'); // ✅ Add this import
 
@@ -88,6 +88,8 @@ class ProductService {
         location: 'Warehouse A'
       });
 
+      emitInventoryChanged({ reason: 'product-created', productId: newProduct.id });
+
       return {
         success: true,
         message: 'Product created successfully',
@@ -165,7 +167,6 @@ class ProductService {
             if (!product) {
                 return { success: false, message: 'Product not found' };
             }
-            
             return { success: true, data: product };
         } catch (error) {
             console.error('Error fetching product:', error);
@@ -228,6 +229,8 @@ class ProductService {
         { new: true, runValidators: true }
       );
 
+      if (product) emitInventoryChanged({ reason: 'product-updated', productId: product.id });
+
       if (!product) {
         return { success: false, message: 'Product not found' };
       }
@@ -267,7 +270,7 @@ class ProductService {
       }
       
       await Product.findOneAndDelete({ id });
-      
+      emitInventoryChanged({ reason: 'product-deleted', productId: id });
       return { success: true, message: 'Product deleted successfully' };
     } catch (error) {
       console.error('Error deleting product:', error);
@@ -686,7 +689,7 @@ async updateSizeStock(productId, sizeName, stock) {
         product.updatedAt = new Date();
         
         await product.save();
-        
+        emitInventoryChanged({ reason: 'stock-updated', productId, sizeName });
         return {
             success: true,
             message: `Stock updated for size "${sizeName}"`,
@@ -725,7 +728,7 @@ async reduceStock(productId, sizeName, quantity) {
         product.updatedAt = new Date();
         
         await product.save();
-        
+        emitInventoryChanged({ reason: 'stock-reduced', productId, sizeName });
         return {
             success: true,
             message: `Stock reduced by ${quantity} for size "${sizeName}"`,

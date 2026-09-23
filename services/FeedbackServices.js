@@ -82,17 +82,37 @@ class FeedbackService {
             // ─── 5. Generate feedback ID ──────────────────────────────────
             const feedbackId = await generateId('FDBK');
 
-            // ─── 6. Create feedback ──────────────────────────────────────
+            // ─── 6. Sanitize detailedRatings ──────────────────────────────
+            // The frontend sends 0 for any dimension the customer didn't rate.
+            // The schema requires min: 1, so 0 must be converted to null
+            // (meaning "not rated") instead of being rejected.
+            const sanitizeRating = (v) => {
+                const n = Number(v);
+                return Number.isFinite(n) && n >= 1 && n <= 5 ? n : null;
+            };
+
+            const sanitizedDetailedRatings = detailedRatings
+                ? {
+                    quality:         sanitizeRating(detailedRatings.quality),
+                    design:          sanitizeRating(detailedRatings.design),
+                    packaging:       sanitizeRating(detailedRatings.packaging),
+                    delivery:        sanitizeRating(detailedRatings.delivery),
+                    valueForMoney:   sanitizeRating(detailedRatings.valueForMoney),
+                    customerService: sanitizeRating(detailedRatings.customerService),
+                }
+                : {};
+
+            // ─── 7. Create feedback ───────────────────────────────────────
             const feedback = new Feedback({
                 feedbackId,
                 orderId,
-                customerId, // ✅ Now this will have a valid value
+                customerId,
                 customerEmail,
                 customerName: customerName || order.customerName,
                 productId,
                 productName,
                 rating,
-                detailedRatings: detailedRatings || {},
+                detailedRatings: sanitizedDetailedRatings,   // ← sanitized
                 title: title || null,
                 comment: comment || '',
                 pros: pros || [],

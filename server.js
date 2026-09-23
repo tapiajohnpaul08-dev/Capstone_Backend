@@ -192,7 +192,18 @@ io.on('connection', (socket) => {
   console.log(`🔌 User connected: ${socket.userId} (${socket.userType})`);
   socketService.addOnlineUser(socket.userId, socket.id, socket.userType, socket.userInfo);
   io.emit('users-online', socketService.getOnlineUsers());
+
+  // Personal room by userId (CUST-xxxx / ADM-xxxx)
   socket.join(`user_${socket.userId}`);
+
+  // Personal room by Mongo _id — services can reach this user via
+  // `Order.orderedBy` which stores the Mongo _id, not the CUST-xxxx id.
+  const mongoId = socket.userInfo?.id || socket.userInfo?._id;
+  if (mongoId) socket.join(`mongo_${mongoId}`);
+
+  // Shared room for every connected admin — services broadcast
+  // order/inventory events to `io.to('admins')` in one call.
+  if (socket.userType === 'admin') socket.join('admins');
   
   socket.on('join-conversation', async (data) => {
     const { conversationId } = data;

@@ -3,6 +3,7 @@ const InventoryItem = require('../models/InventoryItem.Model');
 const Product = require('../models/Product.Model');
 const Supply = require('../models/Supply.Model');
 const generateId = require('../utils/generateItemId');
+const { emitInventoryChanged } = require('../utils/realtime');   // ← ADD THIS
 
 class InventoryService {
 
@@ -35,7 +36,7 @@ class InventoryService {
             });
 
             await inventoryItem.save();
-            
+            emitInventoryChanged({ reason: 'inventory-item-added', itemId: inventoryItem.itemId });
             // Populate with specific model
             await inventoryItem.populate({
                 path: 'itemRef',
@@ -83,7 +84,7 @@ class InventoryService {
             });
 
             await inventoryItem.save();
-            
+            emitInventoryChanged({ reason: 'inventory-item-added', itemId: inventoryItem.itemId });
             // Populate with specific model
             await inventoryItem.populate({
                 path: 'itemRef',
@@ -263,6 +264,7 @@ async getInventoryByType(type) {
                 },
                 { new: true }
             );
+            if (updatedItem) emitInventoryChanged({ reason: 'stock-changed', itemId });
             
             // Populate the result
             let populatedItem = updatedItem.toObject();
@@ -299,7 +301,7 @@ async getInventoryByType(type) {
                 updateData,
                 { new: true, runValidators: true }
             );
-
+            if (item) emitInventoryChanged({ reason: 'inventory-item-updated', itemId: item.itemId });
             if (!item) {
                 return { success: false, message: 'Inventory item not found' };
             }
@@ -332,7 +334,7 @@ async getInventoryByType(type) {
     async deleteInventoryItem(itemId) {
         try {
             const item = await InventoryItem.findOneAndDelete({ itemId });
-
+            emitInventoryChanged({ reason: 'inventory-item-deleted', itemId });
             if (!item) {
                 return { success: false, message: 'Inventory item not found' };
             }
@@ -350,16 +352,21 @@ async getInventoryByType(type) {
 async getLowStockItems() {
     try {
         const lowStockItems = [];
-        
-        // 1. Get low stock supplies from inventory (keep as is - working)
-        const supplies = await InventoryItem.find({ 
+
+        // ── 1. Low-stock supplies ───────────────────────────────────
+        // Uses $expr to compare two fields on the SAME document:
+        // stock <= threshold. The old query `$lte: InventoryItem.threshold`
+        // compared against a schema definition (not a value), so it
+        // always matched nothing.
+        const supplies = await InventoryItem.find({
             itemType: 'supply',
-            stock: { $gt: 0, $lt: 100 }
+            stock: { $gt: 0 },
+            $expr: { $lte: ['$stock', '$threshold'] },
         }).populate('itemRef');
 
         for (const item of supplies) {
-            const supply = await Supply.findById(item.itemRef._id);
-            
+            const supply = await Supply.findById(item.itemRef?._id);
+
             lowStockItems.push({
                 itemId: item.itemId,
                 itemType: 'supply',
@@ -369,21 +376,24 @@ async getLowStockItems() {
                     name: supply?.name || item.itemRef?.name || 'Unknown Supply',
                     category: item.itemRef?.category || supply?.category,
                     supplier: item.itemRef?.supplier || supply?.supplier,
-                    unit: item.unit || supply?.unit
+                    unit: item.unit || supply?.unit,
                 },
                 stock: item.stock,
                 threshold: item.threshold || 100,
-                status: item.stock === 0 ? 'Out of Stock' : 'Low Stock'
+                status: item.stock === 0 ? 'Out of Stock' : 'Low Stock',
             });
         }
-        
-        // 2. Get low stock products directly from Product model (MORE EFFICIENT)
+
+        // ── 2. Low-stock product sizes ──────────────────────────────
+        // Products use a fixed 500-unit threshold (matches the dashboard
+        // summary endpoint and the frontend InventoryTable).
+        const PRODUCT_LOW_STOCK_THRESHOLD = 500;
         const products = await Product.find({});
-        
+
         for (const product of products) {
-            // Check each size for low stock
-            for (const size of product.sizes) {
-                if (size.stock > 0 && size.stock < 100) {
+            for (const size of product.sizes || []) {
+                const stock = size.stock || 0;
+                if (stock > 0 && stock <= PRODUCT_LOW_STOCK_THRESHOLD) {
                     lowStockItems.push({
                         itemId: product.id,
                         itemType: 'product',
@@ -395,19 +405,19 @@ async getLowStockItems() {
                             subcategory: product.subcategory,
                             image: product.image,
                             sizeName: size.name,
-                            sizeStock: size.stock,
-                            sizePrice: size.price
+                            sizeStock: stock,
+                            sizePrice: size.price,
                         },
-                        stock: size.stock,
-                        threshold: 100,
-                        status: 'Low Stock'
+                        stock,
+                        threshold: PRODUCT_LOW_STOCK_THRESHOLD,
+                        status: 'Low Stock',
                     });
                 }
             }
         }
-        
-        console.log(`Found ${lowStockItems.length} low stock items (${lowStockItems.filter(i => i.itemType === 'supply').length} supplies, ${lowStockItems.filter(i => i.itemType === 'product').length} products)`);
-        
+
+        console.log(`Found ${lowStockItems.length} low stock items`);
+
         return { success: true, data: lowStockItems };
     } catch (error) {
         console.error('Error fetching low stock items:', error);

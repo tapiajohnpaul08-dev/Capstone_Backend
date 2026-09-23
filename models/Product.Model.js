@@ -34,6 +34,7 @@ const productSchema = new mongoose.Schema({
     },
 
     subcategory: { type: String, default: '' },
+    description: { type: String, default: '' },   // ← ADDED
     image: { type: String, required: true }, // Stores relative path like '/uploads/products/product-xxx.jpg'    
     imagePublicId: { type: String, default: null }, // Cloudinary public ID
 

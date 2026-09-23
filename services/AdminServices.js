@@ -12,36 +12,45 @@ class AdminService {
   // CREATE
   // ─────────────────────────────────────────
   async createAdmin(payload) {
-    try {
-      const existingAdmin = await Admin.findOne({
-        $or: [
-          { email: payload.email.toLowerCase() },
-          { username: payload.userName },
-        ],
-      });
+  try {
+    // ── Generate a username if one wasn't supplied.
+    // The Admin schema requires both `username` and `email` (unique).
+    // The frontend only sends firstName/lastName/email/password/role,
+    // so we derive a deterministic username from the name.
+    const generatedUsername =
+      payload.username?.trim() ||
+      `${payload.firstName}${payload.lastName}`.toLowerCase().replace(/\s+/g, '');
 
-      if (existingAdmin) {
-        return {
-          success: false,
-          message: "An admin with this email or username already exists",
-          data: existingAdmin,
-        };
-      }
+    const normalizedEmail = payload.email.toLowerCase();
 
-      const salt = await bcrypt.genSalt(10);
-      const hashedPassword = await bcrypt.hash(payload.password, salt);
+    const existingAdmin = await Admin.findOne({
+      $or: [
+        { email: normalizedEmail } ],
+    });
 
-      const newAdmin = new Admin({
-        adminId: await generateId('ADM'),
-        firstName: payload.firstName,
-        middleName: payload.middleName || "",
-        lastName: payload.lastName,
-        // username: payload.username?.trim() || `${payload.firstName} ${payload.lastName}`.trim().toLowerCase().replace(/\s+/g, '.'), email: payload.email,
-        password: hashedPassword,
-        role: payload.role,
-      });
+    if (existingAdmin) {
+      return {
+        success: false,
+        message: "An admin with this email or username already exists",
+        data: existingAdmin,
+      };
+    }
 
-      await newAdmin.save();
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(payload.password, salt);
+
+    const newAdmin = new Admin({
+      adminId: await generateId('ADM'),
+      firstName: payload.firstName,
+      middleName: payload.middleName || "",
+      lastName: payload.lastName,
+      username: generatedUsername,
+      email: normalizedEmail,
+      password: hashedPassword,
+      role: payload.role,
+    });
+
+    await newAdmin.save();
 
       const adminData = newAdmin.toObject();
       delete adminData.password;

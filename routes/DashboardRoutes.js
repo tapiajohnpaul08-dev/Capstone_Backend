@@ -22,6 +22,13 @@ router.get('/summary', verifyAdminToken, async (req, res) => {
     startOfWeek.setDate(now.getDate() - 6);
     startOfWeek.setHours(0, 0, 0, 0);
 
+    // ✅ For the "today" cards
+    const startOfToday = new Date(now);
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const endOfToday = new Date(now);
+    endOfToday.setHours(23, 59, 59, 999);
+
     const [
       orderStatsAgg,
       revenueCategoryAgg,
@@ -29,6 +36,11 @@ router.get('/summary', verifyAdminToken, async (req, res) => {
       lowStockProductsAgg,
       lowStockSuppliesAgg,
       recentOrders,
+      scheduledTodayCount,       // ✅ NEW
+      inProductionCount,         // ✅ NEW
+      completedTodayAgg,         // ✅ NEW (count + revenue)
+      pickupsReadyCount,         // ✅ NEW
+      unpaidCount,               // ✅ NEW
     ] = await Promise.all([
       // ── 1. Order counts + completed revenue, one aggregate ─────
       Order.aggregate([
@@ -105,7 +117,10 @@ router.get('/summary', verifyAdminToken, async (req, res) => {
         {
           $match: {
             itemType: 'supply',
-            stock: { $gt: 0, $lte: InventoryItem.threshold },
+            stock: { $gt: 0 },
+            // Compare two fields on the same document — $lte: '$threshold'
+            // cannot be done with a plain query; $expr is required.
+            $expr: { $lte: ['$stock', '$threshold'] },
           },
         },
         {
@@ -141,6 +156,48 @@ router.get('/summary', verifyAdminToken, async (req, res) => {
           'orderId customerName customerEmail customerPhone amount status paymentStatus receivingMode orderedAt productName quantity items',
         )
         .lean(),
+
+      // ── 7. ✅ NEW — Orders scheduled for production TODAY ──────
+      // Includes both `Scheduled` (waiting to start) and
+      // `In Production` (already running) with a schedule of today.
+      Order.countDocuments({
+        status: { $in: ['Scheduled', 'In Production'] },
+        productionSchedule: { $gte: startOfToday, $lte: endOfToday },
+      }),
+
+      // ── 8. ✅ NEW — Orders currently in production (any date) ──
+      Order.countDocuments({ status: 'In Production' }),
+
+      // ── 9. ✅ NEW — Orders completed today + revenue ───────────
+      Order.aggregate([
+        {
+          $match: {
+            status: 'Completed',
+            updatedAt: { $gte: startOfToday },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            count: { $sum: 1 },
+            revenue: { $sum: '$amount' },
+          },
+        },
+      ]),
+
+      // ── 10. ✅ NEW — Pickup orders currently ready ─────────────
+      // "Ready for pickup" = Out for Delivery status + Pick-up mode.
+      // The admin UI displays these as "Ready to Pick-up".
+      Order.countDocuments({
+        status: 'Out for Delivery',
+        receivingMode: 'Pick-up',
+      }),
+
+      // ── 11. ✅ NEW — Unpaid/Partial orders (money still owed) ──
+      Order.countDocuments({
+        paymentStatus: { $in: ['Unpaid', 'Partial'] },
+        status: { $nin: ['Cancelled'] },
+      }),
     ]);
 
     // ── Shape stats ───────────────────────────────────────────────
@@ -153,6 +210,14 @@ router.get('/summary', verifyAdminToken, async (req, res) => {
       completedOrders: 0,
       cancelledOrders: 0,
       totalRevenue: 0,
+
+      // ✅ NEW — today-focused metrics
+      scheduledToday:     scheduledTodayCount || 0,
+      inProductionNow:    inProductionCount || 0,
+      completedToday:     completedTodayAgg[0]?.count   || 0,
+      revenueToday:       completedTodayAgg[0]?.revenue || 0,
+      pickupsReady:       pickupsReadyCount || 0,
+      unpaidOrders:       unpaidCount || 0,
     };
 
     for (const row of orderStatsAgg) {
@@ -494,10 +559,11 @@ router.get('/sidebar-counts', verifyAdminToken, async (req, res) => {
         { $count: 'count' },
       ]),
 
-      // 3. Low-stock SUPPLIES — same rule as /summary (1..100)
+      // 3. Low-stock SUPPLIES — same rule as /summary
       InventoryItem.countDocuments({
         itemType: 'supply',
-        stock: { $gt: 0, $lte: InventoryItem.threshold },
+        stock: { $gt: 0 },
+        $expr: { $lte: ['$stock', '$threshold'] },
       }),
 
       // 4. Pending negotiations — open/in_progress conversations whose
