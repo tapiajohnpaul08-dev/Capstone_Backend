@@ -1023,7 +1023,7 @@ if (
             const driverName = order?.driverDetails?.driverName || 'Not assigned';
             const driverPhone = order?.driverDetails?.driverPhone || 'No phone';
             return `Order is out for delivery (Driver: ${driverName}, Phone: ${driverPhone})`;
-
+            
           case "Completed":
             if (isPickup) {
               return "Order has been picked up by customer";

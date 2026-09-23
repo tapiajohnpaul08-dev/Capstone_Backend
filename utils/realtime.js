@@ -23,7 +23,12 @@ const emitToUser = (userId, event, payload = {}) => {
 // because `Order.orderedBy` stores the customer's Mongo _id.
 const emitToMongoUser = (mongoId, event, payload = {}) => {
   try {
-    if (global.__io__ && mongoId) global.__io__.to(`mongo_${mongoId}`).emit(event, payload);
+    if (global.__io__ && mongoId) {
+      const room = `mongo_${mongoId}`;
+      const listeners = global.__io__?.sockets?.adapter?.rooms?.get(room)?.size || 0;
+      console.log(`📡 [realtime] → ${room} | ${event} | listeners: ${listeners}`);
+      global.__io__.to(room).emit(event, payload);
+    }
   } catch (e) {
     console.error(`realtime.emitToMongoUser(${event}) failed:`, e.message);
   }
