@@ -37,14 +37,10 @@ const corsOptions = {
       'https://capstone-delivery-portal-five.vercel.app',
       'https://capstone-backend-bp5a.onrender.com',
       'https://capstone-acapsshop.vercel.app'   // Add your shop domain
-    ];
-    
-    console.log('CORS Request from origin:', origin);
-    
+    ];    
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
-      console.log('CORS blocked origin:', origin);
       callback(new Error('Not allowed by CORS'));
     }
   },

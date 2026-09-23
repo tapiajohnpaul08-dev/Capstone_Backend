@@ -37,7 +37,6 @@ class SupplyService {
 
             await newSupply.save();
 
-            console.log('New supply created:', newSupply); // ✅ Move this BEFORE return
 
             return {
                 success: true,

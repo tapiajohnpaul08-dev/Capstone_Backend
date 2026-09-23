@@ -60,9 +60,6 @@ class ChatService {
             lastMessageAt: new Date(),
           });
           await conversation.save();
-          console.log(
-            `📬 Created per-order conversation ${conversation.conversationId} for ${orderId}`,
-          );
         }
       } else {
         // No orderId — old behavior. Find an open unlinked conversation.
@@ -84,9 +81,6 @@ class ChatService {
             lastMessageAt: new Date(),
           });
           await conversation.save();
-          console.log(
-            `📬 Created general conversation ${conversation.conversationId} for ${customerId}`,
-          );
         }
       }
 
@@ -146,9 +140,6 @@ class ChatService {
           unlinkedConv.subject = `Order ${order.orderId}`;
           unlinkedConv.updatedAt = new Date();
           await unlinkedConv.save();
-          console.log(
-            `🔗 Auto-linked orphaned order ${order.orderId} → ${unlinkedConv.conversationId}`,
-          );
         } else {
           const newConv = new Conversation({
             conversationId: await generateId('CONV'),
@@ -161,9 +152,6 @@ class ChatService {
             lastMessageAt: new Date(),
           });
           await newConv.save();
-          console.log(
-            `🆕 Created conversation for orphaned order ${order.orderId}`,
-          );
         }
       }
     } catch (err) {
@@ -224,7 +212,6 @@ class ChatService {
           conv.subject = `Order ${order.orderId}`;
           conv.updatedAt = new Date();
           await conv.save();
-          console.log(`🔗 Admin auto-link ${order.orderId} → ${conv.conversationId}`);
         } else {
           await Conversation.create({
             conversationId: await generateId('CONV'),
@@ -236,7 +223,6 @@ class ChatService {
             status: 'open',
             lastMessageAt: new Date(),
           });
-          console.log(`🆕 Admin created conversation for orphaned ${order.orderId}`);
         }
       }
     } catch (err) {
@@ -740,9 +726,6 @@ async sendMessage(conversationId, senderId, senderName, senderType, content, att
       }
 
       const customer = await Customer.findOne({customerId})
-
-      console.log(`Customer ID: ${customer._id} -- OrderedBy: ${order.orderedBy}`)
-      console.log('Convo Id', conversationId)
 
       if (order.orderedBy != customer._id) {
         return { success: false, message: 'Order does not belong to this customer' };

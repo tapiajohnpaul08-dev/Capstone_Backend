@@ -162,7 +162,6 @@ class ProductService {
     async getProductById(id) {
         try {
             const product = await Product.findOne({ id });
-            console.log('pr-id:', id);
              
             if (!product) {
                 return { success: false, message: 'Product not found' };
@@ -671,7 +670,6 @@ class ProductService {
 
 async updateSizeStock(productId, sizeName, stock) {
     try {
-        console.log('productID', productId)
         const product = await Product.findOne({ id: productId });
         
         if (!product) {

@@ -112,7 +112,6 @@ class MailService {
         });
 
         if (result.success) {
-            console.log(`✅ Bulk stock alert sent for ${items.length} items`);
             return { success: true, message: 'Bulk notification sent successfully' };
         }
         return result;
@@ -147,7 +146,6 @@ class MailService {
         });
 
         if (result.success) {
-            console.log(`✅ Full inventory report sent with ${items.length} items`);
             return { success: true, message: 'Full report sent successfully' };
         }
         return result;

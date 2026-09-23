@@ -171,10 +171,6 @@ class OrderService {
       );
 
       if (result?.success && result.data) {
-        console.log(
-          `🔗 Order ${order.orderId} linked to conversation ${result.data.conversationId} (customerId=${chatCustomerId})`,
-        );
-
         // ✅ Only greet if this is a fresh conversation. If the conversation
         // already had messages (meaning the customer and admin had already
         // started talking), we don't want to spam them with a greeting every
@@ -237,9 +233,6 @@ class OrderService {
       );
 
       if (result?.success) {
-        console.log(
-          `💬 Auto-greeting sent to ${conversation.conversationId} for order ${order.orderId}`,
-        );
       } else {
         console.warn(
           `⚠️ Auto-greeting failed for ${order.orderId}: ${result?.message || 'unknown error'}`,
@@ -289,9 +282,6 @@ class OrderService {
         },
       );
 
-      console.log(
-        `💰 totalSpent ${delta > 0 ? '+' : ''}${delta} applied for ${customer.email} (matched ${result.matchedCount}, modified ${result.modifiedCount})`,
-      );
     } catch (err) {
       // Non-fatal: don't break the order flow if totalSpent update fails
       console.error('Error updating customer totalSpent:', err);
@@ -305,8 +295,6 @@ class OrderService {
     
     const session = await mongoose.startSession();
     try {
-      console.log("\n=== 🔵 CREATE ORDER STARTED ===");
-      console.log("Payload:", JSON.stringify(payload, null, 2));
 
       let orderedById;
       let customerEmail = payload.customerEmail;
@@ -327,7 +315,6 @@ class OrderService {
         const customer = await Customer.findOne({ _id: user._id });
         if (customer) {
           customerId = customer._id;
-          console.log(`✅ Found customer: ${customer.email} (ID: ${customerId})`);
         } else {
           console.warn(`⚠️ Customer not found for user ID: ${user._id}`);
         }
@@ -336,7 +323,6 @@ class OrderService {
         if (customer) {
           customerId = customer._id;
           orderedById = customer._id.toString();
-          console.log(`✅ Found customer by email: ${customerEmail} (ID: ${customerId})`);
         } else {
           console.warn(`⚠️ Customer not found for email: ${customerEmail}`);
         }
@@ -380,9 +366,6 @@ class OrderService {
           designNotes: firstItem.designNotes || payload.designNotes || "",
           files: firstItem.files || payload.files || [],
         };
-
-        console.log(`✅ Own cups order - hasDesign: ${hasDesign}`);
-        console.log(`✅ Own cups order - serverAmount: ${serverAmount}`);
 
         newOrder = new Order({
           orderId: `${providedId}-PROV`,
@@ -453,7 +436,6 @@ class OrderService {
           await Customer.findByIdAndUpdate(customerId, {
             $push: { orders: newOrder._id }
           });
-          console.log(`✅ Order ${newOrder.orderId} added to customer's orders array`);
         }
 
         // ✅ Auto-link the new order to the customer's chat thread
@@ -548,8 +530,6 @@ class OrderService {
           const shippingFee = Number(payload.shippingFee) || 0;
           const serverAmount = productTotal + designFee + shippingFee;
 
-          console.log(`✅ Company order - hasDesign: ${hasDesign}, amount: ${serverAmount}`);
-
           const firstItem = processedItems[0] || {};
           const designDetails = {
             designSource: firstItem.designSource || "upload",
@@ -608,7 +588,6 @@ class OrderService {
             await Customer.findByIdAndUpdate(customerId, {
               $push: { orders: newOrder._id }
             }).session(session);
-            console.log(`✅ Order ${newOrder.orderId} added to customer's orders array (transaction)`);
           }
         });
 
@@ -638,7 +617,6 @@ class OrderService {
 
       if (txnResult) return txnResult;
 
-      console.log("✅ Order created:", newOrder.orderId);
       return { success: true, message: "Order created successfully", data: newOrder };
     } catch (error) {
       console.error("❌ Error creating order:", error);
@@ -772,14 +750,12 @@ if (
       await Customer.findByIdAndUpdate(customerId, {
         $push: { orders: newOrder._id }
       });
-      console.log(`✅ Order ${newOrder.orderId} added to customer's orders array (fallback)`);
     }
 
     // ✅ Auto-link the new order to the customer's chat thread
     await this._autoLinkOrderToConversation(newOrder);
     emitOrderChanged(newOrder, 'created');
     emitInventoryChanged({ reason: 'order-created', orderId: newOrder.orderId });
-    console.log("✅ Order created (no transaction):", newOrder.orderId);
     return { success: true, message: "Order created successfully", data: newOrder };
   }
 
@@ -827,8 +803,6 @@ if (
   ) {
     const { codCollected = false } = options;    try {
       newStatus = normalizeIncomingStatus(newStatus);
-
-      console.log(`🔵 Updating order status for ${orderId} to ${newStatus}`);
 
       if (!VALID_STATUSES.includes(newStatus)) {
         return { success: false, message: "Invalid status" };
@@ -937,13 +911,11 @@ if (
         if (!incrementResult.success) {
           return { success: false, message: incrementResult.message };
         }
-        console.log(`✅ Driver ${driverId} assigned orders count incremented to ${incrementResult.data.assignedOrdersCount}`);
       }
 
       if ((newStatus === "Completed" || newStatus === "Cancelled") && order.driverDetails?.driverId) {
         const decrementResult = await DriverService.decrementAssignedOrders(order.driverDetails.driverId);
         if (decrementResult.success) {
-          console.log(`✅ Driver ${order.driverDetails.driverId} assigned orders count decremented to ${decrementResult.data.assignedOrdersCount}`);
         } else {
           console.warn(`⚠️ Could not release driver ${order.driverDetails.driverId}: ${decrementResult.message}`);
         }
@@ -976,9 +948,6 @@ if (
             if (updatedProduct) {
               const restored = updatedProduct.sizes.find(
                 (s) => s.name === item.size,
-              );
-              console.log(
-                `↩️  Restored +${item.quantity} to ${updatedProduct.name} (${item.size}) — new stock: ${restored?.stock}`,
               );
             } else {
               console.warn(
@@ -1792,7 +1761,6 @@ if (
         // Non-fatal
       }
 
-      console.log(`📢 Delay notice pushed to ${conversation.conversationId}`);
     } catch (err) {
       // Never break the delay flow over a chat failure
       console.error('_pushDelayNoticeToChat failed:', err);
@@ -1830,7 +1798,6 @@ if (
             }
             inventory.stock -= quantityDiff;
             await inventory.save();
-            console.log(`Stock adjusted: ${quantityDiff > 0 ? "-" : "+"}${Math.abs(quantityDiff)}`);
           }
         }
       }
@@ -1874,14 +1841,12 @@ if (
           if (inventory) {
             inventory.stock += order.quantity;
             await inventory.save();
-            console.log(`Inventory restored on delete: +${order.quantity}`);
           }
         }
       }
 
       if (order.driverDetails?.driverId) {
         await DriverService.decrementAssignedOrders(order.driverDetails.driverId);
-        console.log(`✅ Driver ${order.driverDetails.driverId} released on order deletion`);
       }
 
       if (order.orderedBy) {
@@ -1890,7 +1855,6 @@ if (
           await Customer.findByIdAndUpdate(customer._id, {
             $pull: { orders: order._id }
           });
-          console.log(`✅ Order ${order.orderId} removed from customer's orders array`);
         }
       }
 
@@ -2073,9 +2037,6 @@ if (
                   : user.email || user._id?.toString() || "System"
                 : "System (auto-recorded on Paid)",
             });
-            console.log(
-              `✅ Recorded remaining balance ₱${remainingBalance} for order ${order.orderId}`,
-            );
           }
         }
       }
@@ -2247,9 +2208,6 @@ if (
                 : user.email || "Customer"
               : "Customer (marked received)",
           });
-          console.log(
-            `✅ Recorded remaining balance ₱${remainingBalance} for order ${order.orderId} (customer received)`,
-          );
         }
 
         order.status = "Completed";
@@ -2270,7 +2228,6 @@ if (
         if (order.driverDetails?.driverId) {
           const decrementResult = await DriverService.decrementAssignedOrders(order.driverDetails.driverId);
           if (decrementResult.success) {
-            console.log(`✅ Driver ${order.driverDetails.driverId} released after delivery received`);
           }
         }
       }

@@ -18,7 +18,6 @@ const verifyAdminToken = async (req, res, next) => {
         }
 
         const response = await adminService.verifyToken(token);
-        console.log('Admin verify response:', response.success);
         if (!response.success) {
             return res.status(401).json({
                 success: false,
@@ -87,9 +86,7 @@ const verifyDriverToken = async (req, res, next) => {
             });
         }
 
-        const response = await driverService.verifyToken(token);
-        console.log('Driver verify response:', response.success);
-        
+        const response = await driverService.verifyToken(token);        
         if (!response.success) {
             return res.status(401).json({
                 success: false,
@@ -116,8 +113,6 @@ const verifyDriverToken = async (req, res, next) => {
             available: driverData.available,
             assignedOrdersCount: driverData.assignedOrdersCount || 0
         };
-
-        console.log(`✅ Driver authenticated: ${req.user.driverId} (${req.user.email})`);
         next();
 
     } catch (error) {

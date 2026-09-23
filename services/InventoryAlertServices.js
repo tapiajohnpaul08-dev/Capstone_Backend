@@ -223,9 +223,7 @@ class InventoryAlertService {
                     const stock = size.stock || 0;
                     const threshold = 100;
                     
-                    if (this.needsAlert(stock, threshold)) {
-                        console.log(`Sending alert for product size: ${product.name} (${size.name}), stock: ${stock}`);
-                        
+                    if (this.needsAlert(stock, threshold)) {                        
                         const result = await mailService.sendStockAlert({
                             itemName: product.name,
                             itemType: 'product',

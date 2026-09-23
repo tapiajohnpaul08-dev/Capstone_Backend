@@ -152,7 +152,6 @@ class AdminService {
   async getAllCustomers() {
     try {
       const customers = await Customer.find().select("-password");
-      console.log("Found customers:", customers.length);
       return { success: true, data: customers };
     } catch (error) {
       console.error("Error fetching customers:", error);

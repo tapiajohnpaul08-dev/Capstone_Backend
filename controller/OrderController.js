@@ -378,7 +378,6 @@ class OrderController {
                     const conv = await Conversation.findOne({ orderId });
                     if (conv) {
                         io.to(`conv_${conv.conversationId}`).emit('order-negotiation-updated', response.data);
-                        console.log(`📤 Emitted order-negotiation-updated to conv_${conv.conversationId}`);
                     } else {
                         console.warn(`⚠️ No conversation found for orderId ${orderId}`);
                     }

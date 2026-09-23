@@ -51,7 +51,6 @@ class FeedbackService {
                     customerId = customer._id;
                     customerEmail = customer.email;
                     customerName = `${customer.firstName} ${customer.lastName}`;
-                    console.log(`✅ Customer found via authenticated user: ${customerEmail} (ID: ${customerId})`);
                 } else {
                     console.warn(`⚠️ User authenticated but customer not found: ${user._id}`);
                 }
@@ -62,7 +61,6 @@ class FeedbackService {
                 const customer = await Customer.findOne({ email: customerEmail });
                 if (customer) {
                     customerId = customer._id;
-                    console.log(`✅ Customer found via email: ${customerEmail} (ID: ${customerId})`);
                 } else {
                     console.warn(`⚠️ Customer not found for email: ${customerEmail}`);
                 }

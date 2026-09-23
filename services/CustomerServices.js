@@ -16,13 +16,8 @@ class CustomerService {
   // Update the register method to properly validate OTP
   async register(payload, otp) {
     try {
-      console.log("=== REGISTER DEBUG ===");
-      console.log("Received payload:", JSON.stringify(payload, null, 2));
-      console.log("Received OTP:", otp);
-
       // Check if OTP is provided
       if (!otp) {
-        console.log("No OTP provided");
         return {
           success: false,
           message: "OTP is required. Please request an OTP first.",
@@ -31,7 +26,6 @@ class CustomerService {
 
       // Verify OTP
       const otpVerification = await verifyOtp(payload.email, otp);
-      console.log("OTP verification result:", otpVerification);
 
       if (!otpVerification.success) {
         return {
@@ -69,11 +63,6 @@ class CustomerService {
         provider: 'local'
 
       };
-
-      console.log(
-        "Creating customer with data:",
-        JSON.stringify(customerData, null, 2),
-      );
 
       const newCustomer = new Customer(customerData);
       await newCustomer.save();
@@ -162,8 +151,6 @@ class CustomerService {
         token: token,
         expiresAt: new Date(decoded.exp * 1000), // Convert to milliseconds
       });
-
-      console.log("Token blacklisted successfully");
 
       return {
         success: true,
@@ -375,9 +362,6 @@ async requestPasswordChangeOtp(email) {
       // to their Google/Facebook identity in case we ever want to support
       // "sign in with Google" alongside a password.
       if (customer.provider && customer.provider !== 'local') {
-        console.log(
-          `🔄 Provider flip for ${customer.email}: ${customer.provider} → local`,
-        );
         customer.provider = 'local';
       }
 

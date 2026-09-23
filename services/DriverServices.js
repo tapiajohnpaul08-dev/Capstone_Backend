@@ -171,8 +171,6 @@ class DriverService {
             .select('-password')
             .sort({ firstName: 1 });
 
-            console.log(`📦 Found ${drivers.length} available drivers`);
-
             return {
                 success: true,
                 data: drivers,
@@ -346,8 +344,6 @@ class DriverService {
             driver.assignedOrdersCount += 1;
             driver.updatedAt = new Date();
             await driver.save();
-
-            console.log(`📦 Incremented assigned orders for driver ${driverId}. New count: ${driver.assignedOrdersCount}`);
 
             return {
                 success: true,

@@ -29,11 +29,6 @@ createTemplate = [
     const customerId = req.customer.customerId;
     
     // CRITICAL DEBUG LOGS
-    console.log('=== TEMPLATE SAVE DEBUG ===');
-    console.log('Request body:', JSON.stringify(req.body, null, 2));
-    console.log('existingImagePath:', req.body.existingImagePath);
-    console.log('Has file:', !!req.file);
-    
     // If there's an existingImagePath, we don't need the file upload
     // So we call the service without the file
     const response = await customerTemplateService.createTemplate(

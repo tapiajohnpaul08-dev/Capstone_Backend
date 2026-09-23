@@ -219,7 +219,6 @@ class DriverController {
     getAssignedOrders = asyncTryCatch(async (req, res, next) => {
         const { driverId } = req.user;
         
-        console.log(`📡 Fetching assigned orders for driver: ${driverId}`);
         
         const orders = await Order.find({ 
             'driverDetails.driverId': driverId,
@@ -291,11 +290,6 @@ class DriverController {
 
 // controller/DriverController.js
 updateOrderStatus = asyncTryCatch(async (req, res, next) => {
-    console.log('🔵 Driver updateOrderStatus called');
-    console.log('📦 Order ID:', req.params.orderId);
-    console.log('📦 Status from body:', req.body.status);
-    console.log('📦 File received:', req.file ? 'Yes' : 'No');
-    console.log('👤 Driver ID:', req.user.driverId);
     
         const { orderId } = req.params;
     // Get status from body - with multer, it should be a string
@@ -306,15 +300,10 @@ updateOrderStatus = asyncTryCatch(async (req, res, next) => {
     const codCollectedBool =
       codCollected === true || codCollected === 'true' || codCollected === '1';
 
-    // Debug: Log what we received
-    console.log('📦 Status type:', typeof status);
-    console.log('📦 Status value:', status);
-
     // If status is still an object (FormData issue), try to extract it
     if (status && typeof status === 'object') {
-        console.log('⚠️ Status is an object, attempting to extract...');
         status = status.toString();
-        console.log('📦 Extracted status:', status);
+
     }
 
     if (!status) {
@@ -328,7 +317,6 @@ updateOrderStatus = asyncTryCatch(async (req, res, next) => {
     // Accept both 'completed' and 'Completed'
     const normalizedStatus = status.toLowerCase().trim();
     if (normalizedStatus !== 'completed') {
-        console.log('❌ Invalid status:', status);
         return res.status(403).json({
             success: false,
             message: 'You can only mark orders as completed'
@@ -370,9 +358,7 @@ updateOrderStatus = asyncTryCatch(async (req, res, next) => {
         try {
             const cloudinary = require('../config/cloudinary');
             const fs = require('fs');
-            
-            console.log('📤 Uploading proof to Cloudinary...');
-            
+                        
             const result = await cloudinary.uploader.upload(req.file.path, {
                 folder: 'beverage/proofs',
                 transformation: [

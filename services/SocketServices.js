@@ -33,7 +33,6 @@ class SocketService {
   joinConversation(socket, conversationId, userId, userType) {
     const roomName = `conv_${conversationId}`;
     socket.join(roomName);
-    console.log(`User ${userId} (${userType}) joined room: ${roomName}`);
     
     socket.to(roomName).emit('user-joined', {
       userId,
@@ -81,9 +80,7 @@ class SocketService {
   // SAVE AND EMIT MESSAGE - FIXED with replyToMessageId
   // ─────────────────────────────────────────
   async saveAndEmitMessage(conversationId, senderId, senderName, senderType, content, attachments, replyToMessageId, socket) {
-    try {
-      console.log('💬 SocketService.saveAndEmitMessage called with replyToMessageId:', replyToMessageId);
-      
+    try {      
       const conversation = await Conversation.findOne({ conversationId });
       if (!conversation) {
         socket.emit('error', { message: 'Conversation not found' });
@@ -96,14 +93,12 @@ class SocketService {
       let replyTo = null;
       if (replyToMessageId) {
         const originalMessage = await Message.findOne({ messageId: replyToMessageId });
-        console.log('📨 Original message found:', originalMessage ? 'YES' : 'NO');
         if (originalMessage && !originalMessage.isDeleted) {
           replyTo = {
             messageId: originalMessage.messageId,
             content: originalMessage.content || '📎 Attachment',
             sender: originalMessage.senderName || originalMessage.senderType
           };
-          console.log('📨 ReplyTo data set:', replyTo);
         }
       }
       
@@ -124,8 +119,7 @@ class SocketService {
       });
       
       await message.save();
-      console.log('📨 Message saved with replyTo:', message.replyTo);
-      console.log('📨 Message saved with replyToMessageId:', message.replyToMessageId);
+
       
       // ── Update conversation ──
       conversation.lastMessage = content;
@@ -149,7 +143,6 @@ class SocketService {
       const savedMessage = await Message.findOne({ messageId: message.messageId });
       const messageData = savedMessage.toObject();
       
-      console.log('📨 Emitting message with replyTo:', messageData.replyTo);
       
       // ── Emit to conversation room ──
       this.io.to(`conv_${conversationId}`).emit('new-message', messageData);
@@ -171,7 +164,6 @@ class SocketService {
     try {
       if (!conversationId || !order) return;
       this.io.to(`conv_${conversationId}`).emit('order-negotiation-updated', order);
-      console.log(`📤 Emitted order-negotiation-updated for conv ${conversationId}`);
     } catch (error) {
       console.error('Error emitting order-negotiation-updated:', error);
     }
@@ -185,7 +177,6 @@ class SocketService {
     try {
       if (!conversationId || !quoteResponse) return;
       this.io.to(`conv_${conversationId}`).emit('quote-responded', quoteResponse);
-      console.log(`📤 Emitted quote-responded for conv ${conversationId}`);
     } catch (error) {
       console.error('Error emitting quote-responded:', error);
     }

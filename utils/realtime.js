@@ -1,4 +1,3 @@
-console.log('🔥 realtime.js LOADED — v2');
 const emitToAdmins = (event, payload = {}) => {
   try {
     const rooms = global.__io__?.sockets?.adapter?.rooms;
