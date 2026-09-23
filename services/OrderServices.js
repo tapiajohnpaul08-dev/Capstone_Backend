@@ -530,15 +530,19 @@ class OrderService {
           const shippingFee = Number(payload.shippingFee) || 0;
           const serverAmount = productTotal + designFee + shippingFee;
 
-          const firstItem = processedItems[0] || {};
-          const designDetails = {
-            designSource: firstItem.designSource || "upload",
-            designImage: firstItem.designImage || "",
-            printSize: firstItem.printSize || "",
-            printPlacement: firstItem.printPlacement || "",
-            designNotes: firstItem.designNotes || "",
-            files: firstItem.files || [],
-          };
+          // One designDetails entry PER item so cart orders with multiple
+          // designs each keep their own image, files, and print specs.
+          const designDetails = processedItems.map((it) => ({
+            designSource:    it.designSource    || "upload",
+            designImage:     it.designImage     || "",
+            printSize:       it.printSize       || "",
+            printPlacement:  it.printPlacement  || "",
+            designNotes:     it.designNotes     || "",
+            files:           it.files           || [],
+            imagePaths:      (it.files || []).map((f) => f.path).filter(Boolean),
+            selectedTemplate:   it.selectedTemplate   || null,
+            selectedTemplateId: it.selectedTemplateId || null,
+          }));
 
           const OrderId = await generateId("ORD");
 
@@ -695,15 +699,17 @@ if (
     const shippingFee = Number(payload.shippingFee) || 0;
     const serverAmount = productTotal + designFee + shippingFee;
 
-    const firstItem = processedItems[0] || {};
-    const designDetails = {
-      designSource: firstItem.designSource || "upload",
-      designImage: firstItem.designImage || "",
-      printSize: firstItem.printSize || "",
-      printPlacement: firstItem.printPlacement || "",
-      designNotes: firstItem.designNotes || "",
-      files: firstItem.files || [],
-    };
+    const designDetails = processedItems.map((it) => ({
+      designSource:    it.designSource    || "upload",
+      designImage:     it.designImage     || "",
+      printSize:       it.printSize       || "",
+      printPlacement:  it.printPlacement  || "",
+      designNotes:     it.designNotes     || "",
+      files:           it.files           || [],
+      imagePaths:      (it.files || []).map((f) => f.path).filter(Boolean),
+      selectedTemplate:   it.selectedTemplate   || null,
+      selectedTemplateId: it.selectedTemplateId || null,
+    }));
 
     const OrderId = await generateId("ORD");
     const newOrder = new Order({
@@ -1100,6 +1106,75 @@ if (
         shippingFee: order.shippingFee,
         amount: order.amount,
       };
+
+      // ─── Multi-item edits (cart orders) ────────────────────────────────
+      // The panel sends `items: [{ productId, size, quantity, unitPrice }]`.
+      // We reconcile each entry against the existing item at the same index.
+      // Stock deltas are applied per item.
+      if (Array.isArray(updates.items) && updates.items.length > 0) {
+        if (order.isProvided) {
+          return { success: false, message: 'Multi-item pricing is not supported for own-cups orders' };
+        }
+        if (updates.items.length !== order.items.length) {
+          return { success: false, message: 'Item count mismatch — cannot add or remove items from the negotiation panel' };
+        }
+
+        for (let i = 0; i < updates.items.length; i++) {
+          const patch = updates.items[i];
+          const item = order.items[i];
+
+          const newQty = Number(patch.quantity);
+          const newUnit = Number(patch.unitPrice);
+          if (!Number.isFinite(newQty) || newQty <= 0) {
+            return { success: false, message: `Item ${i + 1}: quantity must be > 0` };
+          }
+          if (!Number.isFinite(newUnit) || newUnit < 0) {
+            return { success: false, message: `Item ${i + 1}: unit price must be ≥ 0` };
+          }
+
+          // Stock delta (company products only)
+          if (item.productId) {
+            const product = await Product.findOne({ id: item.productId });
+            if (!product) {
+              return { success: false, message: `Product not found: ${item.productId}` };
+            }
+            const sizeObj = product.sizes.find((s) => s.name === item.size);
+            if (!sizeObj) {
+              return { success: false, message: `Size "${item.size}" not found for ${product.name}` };
+            }
+
+            const oldQty = Number(item.quantity) || 0;
+            const diff = newQty - oldQty;
+
+            if (diff > 0 && sizeObj.stock < diff) {
+              return {
+                success: false,
+                message: `Insufficient stock for ${product.name} - ${item.size}. Available: ${sizeObj.stock}`,
+              };
+            }
+            sizeObj.stock -= diff;              // handles add + remove
+            await product.save();
+          }
+
+          const oldUnit = item.quantity > 0
+            ? Number((item.estimatedTotal / item.quantity).toFixed(2))
+            : 0;
+
+          item.quantity = newQty;
+          item.estimatedTotal = Number((newUnit * newQty).toFixed(2));
+
+          if (oldUnit !== newUnit || newQty !== Number(patch.quantity)) {
+            historyEntries.push({
+              field: `items[${i}]`,
+              oldValue: { qty: Number(patch.quantity), unit: oldUnit },
+              newValue: { qty: newQty, unit: newUnit },
+              updatedBy: adminName,
+              updatedById: adminId,
+              notes: updates.notes || '',
+            });
+          }
+        }
+      }
 
       // ─── Quantity (with stock delta) ────────────────────────────────────
       if (updates.quantity !== undefined && updates.quantity !== null) {

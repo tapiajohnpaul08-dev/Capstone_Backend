@@ -42,15 +42,88 @@ class OrderController {
     updateMyOrder = asyncTryCatch(async (req, res, next) => {
         const { orderId } = req.params;
         const userId = req.customer._id.toString();
+
         const order = await orderService.getOrderById(orderId);
         if (!order.success) return res.status(404).json(order);
+
         if (order.data.orderedBy !== userId) {
             return res.status(403).json({ success: false, message: 'Access denied.' });
         }
-        if (order.data.status !== 'Pending') {
-            return res.status(400).json({ success: false, message: `Cannot modify order in ${order.data.status} status.` });
+
+        // ── Status-aware edit matrix ────────────────────────────────
+        // Once an order moves past Pending, the price is locked and the
+        // production/delivery pipeline has been scheduled. Only a small
+        // subset of fields remains customer-editable at each stage.
+        //
+        // IMPORTANT: keep in sync with
+        //   customer-side src/composables/useOrderEditability.js
+        const EDITABLE_BY_STATUS = {
+            Pending: [
+                'receivingMode',
+                'address',
+                'postalCode',
+                'notes',
+                'expectedDelivery',
+                'preferredDate',
+            ],
+            Confirmed: [
+                'address',
+                'postalCode',
+                'notes',
+                'expectedDelivery',
+            ],
+            Scheduled: [
+                'address',
+                'postalCode',
+                'notes',
+            ],
+            'In Production': [
+                'notes',
+            ],
+            'Out for Delivery': [
+                'address',
+                'postalCode',
+                'notes',
+            ],
+            Completed: [],
+            Cancelled: [],
+        };
+
+        const allowed = EDITABLE_BY_STATUS[order.data.status] || [];
+        const requested = Object.keys(req.body || {});
+        const forbidden = requested.filter((f) => !allowed.includes(f));
+
+        if (forbidden.length > 0) {
+            return res.status(400).json({
+                success: false,
+                message: `Cannot edit ${forbidden.join(', ')} while order is "${order.data.status}".`,
+            });
         }
-        const response = await orderService.updateOrder(orderId, req.body, req.customer);
+
+        // Address / postal code only make sense on Delivery orders
+        const isAddressField = (f) => f === 'address' || f === 'postalCode';
+        if (
+            requested.some(isAddressField) &&
+            order.data.receivingMode !== 'Delivery'
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: 'Address cannot be changed on a pick-up order.',
+            });
+        }
+
+        // Whitelist the payload so nothing outside the matrix slips
+        // through even if the whitelist check is bypassed.
+        const safePayload = {}
+        for (const key of requested) {
+            if (allowed.includes(key)) safePayload[key] = req.body[key]
+        }
+
+        const response = await orderService.updateOrder(
+            orderId,
+            safePayload,
+            req.customer,
+        );
         res.status(response.success ? 200 : 400).json(response);
     });
 
