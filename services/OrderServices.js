@@ -67,6 +67,22 @@ function hasValidDesign(item) {
   return false;
 }
 
+function hasItemPhoto(item) {
+  if (!item) return false;
+
+  if (Array.isArray(item.itemPhotos)) {
+    const hasAny = item.itemPhotos.some(
+      (u) => typeof u === 'string' && u.trim(),
+    );
+    if (hasAny) return true;
+  }
+
+  if (typeof item.itemPhoto === 'string' && item.itemPhoto.trim()) {
+    return true;
+  }
+
+  return false;
+}
 class OrderService {
   _getUnitPriceForQuantity(sizeObj, qty) {
     if (!sizeObj) return 0;
@@ -351,6 +367,19 @@ class OrderService {
         const firstItem = payload.items && payload.items.length > 0 ? payload.items[0] : {};
         const providedId = await generateId("ORD");
 
+
+        const hasItemPhotoUploaded =
+          hasItemPhoto(firstItem) || hasItemPhoto(payload);
+
+        if (!hasItemPhotoUploaded) {
+          return {
+            success: false,
+            message:
+              'Please upload at least one photo of your own item — we need to see what it looks like before we can print on it.',
+            code: 'ITEM_PHOTO_REQUIRED',
+          };
+        }
+
         // OWN CUPS: ₱500 flat fee (design + printing service)
         const designFee = DESIGN_AND_PRINTING_FEE;
         const shippingFee = Number(payload.shippingFee) || 0;
@@ -391,6 +420,38 @@ class OrderService {
               files: firstItem.files || payload.files || [],
               selectedTemplateId: firstItem.selectedTemplateId || null,
               selectedTemplate: firstItem.selectedTemplate || null,
+
+              // ✅ NEW — Carry the customer's own-item photos through
+              // to the stored order. Normalize both accepted shapes
+              // (itemPhotos array, or single itemPhoto string) into
+              // one array so downstream code only reads one field.
+              itemPhotos: (() => {
+                const arr = Array.isArray(firstItem.itemPhotos)
+                  ? firstItem.itemPhotos.filter((u) => typeof u === 'string' && u.trim())
+                  : [];
+                if (arr.length) return arr;
+                if (typeof firstItem.itemPhoto === 'string' && firstItem.itemPhoto.trim()) {
+                  return [firstItem.itemPhoto.trim()];
+                }
+                // Top-level fallback for backward compat
+                const topArr = Array.isArray(payload.itemPhotos)
+                  ? payload.itemPhotos.filter((u) => typeof u === 'string' && u.trim())
+                  : [];
+                if (topArr.length) return topArr;
+                if (typeof payload.itemPhoto === 'string' && payload.itemPhoto.trim()) {
+                  return [payload.itemPhoto.trim()];
+                }
+                return [];
+              })(),
+
+              // Cloudinary public IDs (optional — empty if frontend
+              // didn't send them; cleanup will just be skipped)
+              itemPhotoPublicIds: Array.isArray(firstItem.itemPhotoPublicIds)
+                ? firstItem.itemPhotoPublicIds
+                : Array.isArray(payload.itemPhotoPublicIds)
+                  ? payload.itemPhotoPublicIds
+                  : [],
+
               estimatedTotal: 0,
             },
           ],
@@ -409,6 +470,26 @@ class OrderService {
           preferredDate: payload.preferredDate || null,
           fromCustomerToCompanyDeliveryDate: payload.fromCustomerToCompanyDeliveryDate || null,
           isProvided: true,
+
+          // ✅ NEW — Top-level snapshot mirrors items[0].itemPhotos
+          itemPhotos: (() => {
+            const arr = Array.isArray(firstItem.itemPhotos)
+              ? firstItem.itemPhotos.filter((u) => typeof u === 'string' && u.trim())
+              : [];
+            if (arr.length) return arr;
+            if (typeof firstItem.itemPhoto === 'string' && firstItem.itemPhoto.trim()) {
+              return [firstItem.itemPhoto.trim()];
+            }
+            const topArr = Array.isArray(payload.itemPhotos)
+              ? payload.itemPhotos.filter((u) => typeof u === 'string' && u.trim())
+              : [];
+            if (topArr.length) return topArr;
+            if (typeof payload.itemPhoto === 'string' && payload.itemPhoto.trim()) {
+              return [payload.itemPhoto.trim()];
+            }
+            return [];
+          })(),
+
           orderedBy: orderedById,
           notes: payload.notes || "Customer provided items for printing",
           statusHistory: [
@@ -1931,6 +2012,40 @@ if (
             $pull: { orders: order._id }
           });
         }
+      }
+            // ✅ NEW — Clean up the customer's item photos from Cloudinary.
+      try {
+        const { deleteImage } = require('../config/multer');
+
+        const itemPhotoPublicIds = [
+          ...(Array.isArray(order.itemPhotos) ? order.itemPhotos : []),
+        ];
+
+        // Also pull public IDs from items[] if stored per-item
+        if (Array.isArray(order.items)) {
+          for (const it of order.items) {
+            if (Array.isArray(it.itemPhotoPublicIds)) {
+              itemPhotoPublicIds.push(...it.itemPhotoPublicIds);
+            }
+          }
+        }
+
+        // If we don't have public IDs, derive them from the URLs
+        const idsToDelete = itemPhotoPublicIds
+          .filter(Boolean)
+          .map((id) =>
+            typeof id === 'string' && id.includes('cloudinary.com')
+              ? (id.match(/\/v\d+\/([^.]+)/)?.[1] || null)
+              : id,
+          )
+          .filter(Boolean);
+
+        for (const publicId of idsToDelete) {
+          await deleteImage(publicId);
+        }
+      } catch (err) {
+        // Non-fatal — never block order deletion on a Cloudinary failure
+        console.error('Failed to clean up item photos on order delete:', err);
       }
 
       await Order.findOneAndDelete({ orderId });

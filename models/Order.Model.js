@@ -56,9 +56,16 @@ const orderItemSchema = new mongoose.Schema({
   },
   estimatedTotal: { type: Number, default: 0 },
   image: { type: String },
+  itemPhotos: { type: [String], default: [] },
+
+  // Cloudinary public IDs for the itemPhotos, so we can clean up
+  // the assets if the order is deleted.
+  itemPhotoPublicIds: { type: [String], default: [] },
 
   // ✅ NEW — snapshot of rim diameter at time of order.
   rimDiameter: { type: Number, default: null },
+  
+  
 
   // ✅ NEW — item kind for filtering & reporting.
   itemType: {
@@ -267,6 +274,7 @@ acceptedQuote: {
   productionSchedule: { type: Date, default: null },
   driverDetails: driverDetailsSchema,
   isProvided: { type: Boolean, default: false },
+    itemPhotos: { type: [String], default: [] },
   isCartOrder: { type: Boolean, default: false },
   source: { type: String },
   orderedBy: { type: String },

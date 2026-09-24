@@ -50,43 +50,14 @@ class OrderController {
             return res.status(403).json({ success: false, message: 'Access denied.' });
         }
 
-        // ── Status-aware edit matrix ────────────────────────────────
-        // Once an order moves past Pending, the price is locked and the
-        // production/delivery pipeline has been scheduled. Only a small
-        // subset of fields remains customer-editable at each stage.
-        //
-        // IMPORTANT: keep in sync with
-        //   customer-side src/composables/useOrderEditability.js
         const EDITABLE_BY_STATUS = {
-            Pending: [
-                'receivingMode',
-                'address',
-                'postalCode',
-                'notes',
-                'expectedDelivery',
-                'preferredDate',
-            ],
-            Confirmed: [
-                'address',
-                'postalCode',
-                'notes',
-                'expectedDelivery',
-            ],
-            Scheduled: [
-                'address',
-                'postalCode',
-                'notes',
-            ],
-            'In Production': [
-                'notes',
-            ],
-            'Out for Delivery': [
-                'address',
-                'postalCode',
-                'notes',
-            ],
-            Completed: [],
-            Cancelled: [],
+            Pending:          ['address', 'postalCode'],
+            Confirmed:        [],
+            Scheduled:        [],
+            'In Production':  [],
+            'Out for Delivery': [],
+            Completed:        [],
+            Cancelled:        [],
         };
 
         const allowed = EDITABLE_BY_STATUS[order.data.status] || [];
