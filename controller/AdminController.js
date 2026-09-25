@@ -46,6 +46,16 @@ class AdminController {
     res.status(status).json(response);
   });
 
+  // PATCH /api/v1/admin/admin/:adminId/reset-password
+  resetAdminPassword = asyncTryCatch(async (req, res, next) => {
+    const { adminId } = req.params;
+    const { newPassword } = req.body;
+
+    const response = await adminService.resetAdminPassword(adminId, newPassword);
+    const status = response.success ? 200 : 400;
+    res.status(status).json(response);
+  });
+
   // DELETE /api/v1/admin/:adminId
   deleteAdmin = asyncTryCatch(async (req, res, next) => {
     const token = req.headers.authorization?.split(" ")[1];

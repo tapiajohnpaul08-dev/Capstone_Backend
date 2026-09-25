@@ -68,6 +68,9 @@ class ChatController {
     const io = req.app.get('io');
     if (io && response.success) {
       io.to(`conv_${conversationId}`).emit('new-message', response.data);
+            if (userType === 'customer') {
+        io.to('admins').emit('new-message', response.data);
+      }
     }
 
     res.status(201).json(response);

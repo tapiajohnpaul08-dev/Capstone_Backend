@@ -17,6 +17,17 @@ router.get('/allAdmins',          verifyAdminToken, AdminController.getAllAdmins
 router.get('/admin/:adminId',     verifyAdminToken, AdminController.getAdminById); 
 router.put('/admin/:adminId',     verifyAdminToken, AdminController.updateAdmin);
 
+// ✅ NEW — Super Admin can reset another admin's password.
+// Route is scoped under /admin/:adminId/reset-password so it can't be
+// confused with a regular profile update. checkRole keeps the same
+// privilege boundary already used for deleteAdmin.
+router.patch(
+  '/admin/:adminId/reset-password',
+  verifyAdminToken,
+  checkRole('Super Admin'),
+  AdminController.resetAdminPassword,
+);
+
 router.delete('/admin/:adminId',  verifyAdminToken, checkRole('Super Admin'), AdminController.deleteAdmin);
 
 // ─────────────────────────────────────────

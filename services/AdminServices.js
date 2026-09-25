@@ -256,6 +256,45 @@ class AdminService {
   }
 
   // ─────────────────────────────────────────
+  // RESET ADMIN PASSWORD (Super Admin only)
+  //
+  // Unlike updateAdmin — which deliberately strips `password` so a
+  // generic edit can't silently change credentials — this is a
+  // privileged, explicit operation. The route layer enforces the
+  // Super Admin role; this method just does the hashing.
+  // ─────────────────────────────────────────
+  async resetAdminPassword(adminId, newPassword) {
+    try {
+      if (!newPassword || typeof newPassword !== 'string') {
+        return { success: false, message: 'New password is required' };
+      }
+      if (newPassword.length < 8) {
+        return { success: false, message: 'Password must be at least 8 characters' };
+      }
+
+      const admin = await Admin.findOne({ adminId });
+      if (!admin) {
+        return { success: false, message: 'Admin not found' };
+      }
+
+      const salt = await bcrypt.genSalt(10);
+      admin.password = await bcrypt.hash(newPassword, salt);
+      admin.updatedAt = new Date();
+      await admin.save();
+
+      return {
+        success: true,
+        message: 'Password reset successfully',
+        // Never return the new hash — only confirm which admin was touched.
+        data: { adminId: admin.adminId, email: admin.email },
+      };
+    } catch (error) {
+      console.error('Error resetting admin password:', error);
+      throw error;
+    }
+  }
+
+  // ─────────────────────────────────────────
   // DELETE ADMIN
   // ─────────────────────────────────────────
   async deleteAdmin(adminId, token) {

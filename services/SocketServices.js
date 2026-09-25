@@ -146,7 +146,9 @@ class SocketService {
       
       // ── Emit to conversation room ──
       this.io.to(`conv_${conversationId}`).emit('new-message', messageData);
-      
+        if (senderType === 'customer') {
+        this.io.to('admins').emit('new-message', messageData);
+      }
       return messageData;
     } catch (error) {
       console.error('Error saving message:', error);
