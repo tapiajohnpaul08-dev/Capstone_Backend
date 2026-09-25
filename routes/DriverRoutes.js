@@ -6,6 +6,7 @@ const {
     verifyAdminToken, 
     verifyDriverToken 
 } = require('../middleware/authMiddleware');
+const { authLimiter } = require('../middleware/rateLimiters');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -44,7 +45,7 @@ const upload = multer({
 });
 
 // ============ PUBLIC ROUTES ============
-router.post('/login', DriverController.login);
+router.post('/login', authLimiter, DriverController.login);
 
 // Profile management
 router.get('/profile', verifyDriverToken, DriverController.getProfile);

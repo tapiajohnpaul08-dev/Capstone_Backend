@@ -3,8 +3,10 @@ const express = require('express');
 const router = express.Router();
 const AlertController = require('../controller/AlertController');
 const { verifyAdminToken } = require('../middleware/authMiddleware');
+const { alertLimiter } = require('../middleware/rateLimiters');
 
-// Apply admin authentication to all alert routes
+
+router.use(alertLimiter);
 router.use(verifyAdminToken);
 
 // Send alert for specific item

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const ProductController = require('../controller/ProductController');
 const { verifyAdminToken } = require('../middleware/authMiddleware');
+const { uploadLimiter } = require('../middleware/rateLimiters');
 
 // ─────────────────────────────────────────
 // PUBLIC ROUTES (customer can view)
@@ -18,8 +19,8 @@ router.post('/calculate-price', ProductController.calculatePrice);
 // ─────────────────────────────────────────
 // ADMIN ONLY ROUTES (product management)
 // ─────────────────────────────────────────
-router.post('/create', verifyAdminToken, ProductController.createProduct);
-router.put('/update/:id', verifyAdminToken, ProductController.updateProduct);
+router.post('/create', uploadLimiter, verifyAdminToken, ProductController.createProduct);
+router.put('/update/:id', uploadLimiter, verifyAdminToken, ProductController.updateProduct);
 router.delete('/delete/:id', verifyAdminToken, ProductController.deleteProduct);
 router.patch('/update-stock/:id', verifyAdminToken, ProductController.updateStockStatus);
 

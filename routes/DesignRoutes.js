@@ -3,9 +3,12 @@ const express = require('express');
 const router = express.Router();
 const { designUpload } = require('../config/multer');
 const { verifyCustomerToken } = require('../middleware/authMiddleware');
+const { uploadLimiter } = require('../middleware/rateLimiters');
 
-// Upload design files for order
-router.post('/upload-design', verifyCustomerToken, designUpload.array('files', 10), (req, res) => {
+// Upload design files for order.
+// uploadLimiter runs FIRST so unauthenticated floods are rejected before
+// they hit the token verifier or multer's memory buffer.
+router.post('/upload-design', uploadLimiter, verifyCustomerToken, designUpload.array('files', 10), (req, res) => {
   try {
     console.log('📤 Upload request received');
     console.log('Files:', req.files);

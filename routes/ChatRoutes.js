@@ -3,7 +3,7 @@ const router = express.Router();
 const ChatController = require('../controller/ChatContoller');
 const { verifyCustomerToken, verifyAdminToken } = require('../middleware/authMiddleware');
 const { chatUpload } = require('../config/multer');
-
+const { uploadLimiter } = require('../middleware/rateLimiters');
 // ─────────────────────────────────────────
 // CUSTOMER ROUTES
 // ─────────────────────────────────────────
@@ -36,7 +36,7 @@ router.post('/admin/payment-proof/:messageId/verify', verifyAdminToken, ChatCont
 // ─────────────────────────────────────────
 // FILE UPLOAD (customer)
 // ─────────────────────────────────────────
-router.post('/customer/upload', verifyCustomerToken, (req, res, next) => {
+router.post('/customer/upload', uploadLimiter, verifyCustomerToken, (req, res, next) => {
   chatUpload.array('files', 5)(req, res, (err) => {
     if (err) return res.status(400).json({ success: false, message: err.message || 'File upload failed' });
     next();
@@ -63,7 +63,7 @@ router.post('/customer/upload', verifyCustomerToken, (req, res, next) => {
 // ─────────────────────────────────────────
 // FILE UPLOAD (admin)
 // ─────────────────────────────────────────
-router.post('/upload', verifyAdminToken, (req, res, next) => {
+router.post('/upload', uploadLimiter, verifyAdminToken, (req, res, next) => {
   chatUpload.array('files', 5)(req, res, (err) => {
     if (err) return res.status(400).json({ success: false, message: err.message || 'File upload failed' });
     next();

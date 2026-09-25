@@ -4,12 +4,13 @@ const router = express.Router();
 const CustomerController = require('../controller/CustomerController');
 const CustomerTemplateController = require('../controller/CustomerTemplateContoller');
 const { verifyCustomerToken, verifyAdminToken } = require('../middleware/authMiddleware');
+const { authLimiter } = require('../middleware/rateLimiters');
 
 // ─────────────────────────────────────────
 // PUBLIC ROUTES
 // ─────────────────────────────────────────
-router.post('/register', CustomerController.register);
-router.post('/login',    CustomerController.login);
+router.post('/register', authLimiter, CustomerController.register);
+router.post('/login',    authLimiter, CustomerController.login);
 router.get('/verify',    CustomerController.verifyToken);
 
 // ─────────────────────────────────────────
@@ -23,9 +24,9 @@ router.put('/:customerId/password', verifyCustomerToken, CustomerController.chan
 // ─────────────────────────────────────────
 // PASSWORD CHANGE WITH OTP ROUTES
 // ─────────────────────────────────────────
-router.post('/request-password-otp', CustomerController.requestPasswordChangeOtp);
-router.post('/update-password-with-otp', CustomerController.updatePasswordWithOtp);
-router.put('/update-password-with-current/:customerId', CustomerController.updatePasswordWithCurrent);
+router.post('/request-password-otp', authLimiter, CustomerController.requestPasswordChangeOtp);
+router.post('/update-password-with-otp', authLimiter, CustomerController.updatePasswordWithOtp);
+router.put('/update-password-with-current/:customerId', authLimiter, CustomerController.updatePasswordWithCurrent);
 
 // ─────────────────────────────────────────
 // ✅ NEW — SAVED ADDRESS ROUTES

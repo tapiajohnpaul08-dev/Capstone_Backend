@@ -2,12 +2,14 @@ const express = require('express');
 const router = express.Router();
 const AdminController = require('../controller/AdminController');
 const { verifyAdminToken, checkRole } = require('../middleware/authMiddleware');
+const { authLimiter } = require('../middleware/rateLimiters');
 
 // ─────────────────────────────────────────
 // PUBLIC ROUTES (no token required)
 // ─────────────────────────────────────────
-router.post('/register', AdminController.createAdmin);
-router.post('/login',    AdminController.login);
+
+router.post('/register', authLimiter, AdminController.createAdmin);
+router.post('/login',    authLimiter, AdminController.login);
 router.get('/verify',    AdminController.verifyToken);
 
 // ─────────────────────────────────────────
