@@ -22,6 +22,19 @@ class OrderController {
         res.status(response.success ? 201 : 400).json(response);
     });
 
+      // POST /order/admin/walkin
+  createWalkInOrder = asyncTryCatch(async (req, res, next) => {
+    if (!req.admin) {
+      return res.status(401).json({
+        success: false,
+        message: 'Admin authentication required',
+      });
+    }
+
+    const response = await orderService.createWalkInOrder(req.body, req.admin);
+    res.status(response.success ? 201 : 400).json(response);
+  });
+
     getMyOrders = asyncTryCatch(async (req, res, next) => {
         const userId = req.customer._id.toString();
         const response = await orderService.getOrdersByOrderedBy(userId);

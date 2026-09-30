@@ -25,6 +25,9 @@ router.patch('/customer/orders/:orderId/mark-received', orderController.toggleRe
 router.use('/admin', verifyAdminToken);
 
 router.post('/admin/create', orderController.createOrder);
+
+router.post('/admin/walkin', orderController.createWalkInOrder);
+
 router.get('/admin/all', orderController.getAllOrders);
 router.get('/admin/statistics', orderController.getOrderStatistics);
 router.get('/admin/date-range', orderController.getOrdersByDateRange);

@@ -315,6 +315,11 @@ acceptedQuote: {
   },
   proofOfDelivery: { type: String, default: null }, // ← Add this field
   updatedBy: { type: String },
+
+   // ✅ Walk-in order metadata (order created by an admin on behalf of a customer)
+  createdByAdmin:     { type: Boolean, default: false },
+  createdByAdminId:   { type: String,  default: '' },
+  createdByAdminName: { type: String,  default: '' },
 });
 
 

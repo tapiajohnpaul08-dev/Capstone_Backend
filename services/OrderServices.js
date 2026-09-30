@@ -710,6 +710,371 @@ class OrderService {
     }
   }
 
+    // ─────────────────────────────────────────
+  // CREATE WALK-IN ORDER (Admin-only, self-contained)
+  //
+  // Separate from `createOrder` so customer-facing code paths
+  // are never affected. A walk-in order:
+  //   • is always created by an admin
+  //   • may be for a customer without an account (email optional)
+  //   • accepts an initial payment status (Unpaid / Partial / Paid)
+  //   • skips the customer-facing preferredDate business-day clamping
+  //
+  // Reuses the existing helpers:
+  //   _getUnitPriceForQuantity, _applyTotalSpentDelta,
+  //   _autoLinkOrderToConversation, calculateExpectedDelivery,
+  //   emitOrderChanged, emitInventoryChanged
+  // ─────────────────────────────────────────
+  async createWalkInOrder(payload, admin) {
+    try {
+      // ── 1. Admin context ────────────────────────────────────────────
+      if (!admin) {
+        return { success: false, message: 'Admin authentication required' };
+      }
+      const adminName = admin.firstName
+        ? `${admin.firstName} ${admin.lastName || ''}`.trim()
+        : admin.email || 'Admin';
+      const adminId = admin.adminId || admin._id?.toString() || '';
+
+      // ── 2. Validate customer name ───────────────────────────────────
+      const customerName = (payload.customerName || '').trim();
+      if (!customerName) {
+        return { success: false, message: 'Customer name is required' };
+      }
+
+      // ── 3. Resolve the customer account (optional) ──────────────────
+      // Walk-in customers may not have an account. We try to match by
+      // email so the order can be auto-linked to their chat thread, but
+      // we do NOT require it.
+      const customerEmail = (payload.customerEmail || '').trim().toLowerCase();
+      let customer = null;
+      if (customerEmail) {
+        customer = await Customer.findOne({ email: customerEmail });
+      }
+
+      // ── 4. Receiving mode + expected delivery ───────────────────────
+      const receivingMode = payload.receivingMode === 'Delivery' ? 'Delivery' : 'Pick-up';
+
+      if (receivingMode === 'Delivery' && !payload.address?.trim()) {
+        return { success: false, message: 'Delivery address is required for Delivery orders' };
+      }
+
+      let expectedDelivery;
+      if (payload.expectedDelivery) {
+        expectedDelivery = new Date(payload.expectedDelivery);
+        if (Number.isNaN(expectedDelivery.getTime())) {
+          return { success: false, message: 'Invalid expected delivery date' };
+        }
+      } else {
+        expectedDelivery = this.calculateExpectedDelivery(receivingMode);
+      }
+
+      // ── 5. Process items ────────────────────────────────────────────
+      const isProvided = payload.isProvided === true;
+      const rawItems = Array.isArray(payload.items) ? payload.items : [];
+
+      if (rawItems.length === 0) {
+        return { success: false, message: 'At least one item is required' };
+      }
+
+      const processedItems = [];
+      let productSubtotal = 0;
+      let hasDesign = false;
+
+      if (!isProvided) {
+        // ── Company products ────────────────────────────────────────
+        for (const item of rawItems) {
+          if (!item.productId || !item.size) {
+            return { success: false, message: 'Every item requires a product and size' };
+          }
+          const qty = Number(item.quantity);
+          if (!Number.isFinite(qty) || qty < 1) {
+            return { success: false, message: `Invalid quantity for ${item.name || item.productId}` };
+          }
+
+          const product = await Product.findOne({ id: item.productId });
+          if (!product) {
+            return { success: false, message: `Product not found: ${item.name || item.productId}` };
+          }
+
+          const sizeObj = product.sizes.find((s) => s.name === item.size);
+          if (!sizeObj) {
+            return {
+              success: false,
+              message: `Size "${item.size}" not found for ${product.name}`,
+            };
+          }
+
+          const minOrder = Number(product.minOrder) || 1;
+          if (qty < minOrder) {
+            return {
+              success: false,
+              message: `${product.name} requires a minimum order of ${minOrder} units`,
+            };
+          }
+
+          if ((sizeObj.stock || 0) < qty) {
+            return {
+              success: false,
+              message: `Insufficient stock for ${product.name} - ${item.size}. Available: ${sizeObj.stock || 0}`,
+            };
+          }
+
+          // Admin can override the unit price explicitly; otherwise we
+          // fall back to the same bulk-tier logic the customer flow uses.
+          const unitPrice =
+            item.unitPrice != null && Number.isFinite(Number(item.unitPrice))
+              ? Number(item.unitPrice)
+              : this._getUnitPriceForQuantity(sizeObj, qty);
+
+          const itemTotal = Number((unitPrice * qty).toFixed(2));
+          productSubtotal += itemTotal;
+
+          const designSource = item.designSource || 'no-design';
+          if (designSource !== 'no-design') hasDesign = true;
+
+          processedItems.push({
+            productId: item.productId,
+            name: product.name,
+            category: product.category,
+            size: item.size,
+            quantity: qty,
+            designSource,
+            designImage: item.designImage || '',
+            printSize: item.printSize || '',
+            printPlacement: item.printPlacement || '',
+            designNotes: item.designNotes || '',
+            files: Array.isArray(item.files) ? item.files : [],
+            selectedTemplate: item.selectedTemplate || null,
+            selectedTemplateId: item.selectedTemplateId || null,
+            estimatedTotal: itemTotal,
+            image: product.image,
+            rimDiameter: item.rimDiameter ?? sizeObj.rimDiameter ?? null,
+            itemType: item.itemType || 'cup',
+            itemPhotos: [],
+          });
+
+          // Deduct stock immediately
+          sizeObj.stock = (sizeObj.stock || 0) - qty;
+          await product.save();
+        }
+      } else {
+        // ── Own-cups ────────────────────────────────────────────────
+        const firstItem = rawItems[0] || {};
+        const qty = Number(firstItem.quantity);
+        if (!Number.isFinite(qty) || qty < 1) {
+          return { success: false, message: 'A valid quantity is required' };
+        }
+        if (!firstItem.name?.trim()) {
+          return { success: false, message: 'Item name is required' };
+        }
+
+        // Normalize item photos (array or single)
+        const itemPhotos = (() => {
+          const arr = Array.isArray(firstItem.itemPhotos)
+            ? firstItem.itemPhotos.filter((u) => typeof u === 'string' && u.trim())
+            : [];
+          if (arr.length) return arr;
+          if (typeof firstItem.itemPhoto === 'string' && firstItem.itemPhoto.trim()) {
+            return [firstItem.itemPhoto.trim()];
+          }
+          return [];
+        })();
+
+        if (itemPhotos.length === 0) {
+          return {
+            success: false,
+            message: 'At least one photo of the customer\'s item is required',
+          };
+        }
+
+        hasDesign = true; // Own-cups always involves printing
+
+        processedItems.push({
+          productId: null,
+          name: firstItem.name.trim(),
+          category: 'Customer Provided',
+          size: firstItem.size || 'Custom',
+          quantity: qty,
+          designSource: firstItem.designSource || 'upload',
+          designImage: firstItem.designImage || '',
+          printSize: firstItem.printSize || '',
+          printPlacement: firstItem.printPlacement || '',
+          designNotes: firstItem.designNotes || '',
+          files: Array.isArray(firstItem.files) ? firstItem.files : [],
+          selectedTemplate: null,
+          selectedTemplateId: null,
+          estimatedTotal: 0,
+          image: '',
+          itemPhotos,
+          itemPhotoPublicIds: Array.isArray(firstItem.itemPhotoPublicIds)
+            ? firstItem.itemPhotoPublicIds
+            : [],
+          itemType: 'cup',
+          rimDiameter: null,
+        });
+      }
+      const explicitDesignFee =
+        payload.designFee != null && Number.isFinite(Number(payload.designFee))
+          ? Math.max(0, Number(payload.designFee))
+          : null;
+
+      const designFee = hasDesign
+        ? (explicitDesignFee != null ? explicitDesignFee : DESIGN_AND_PRINTING_FEE)
+        : 0;
+
+      const shippingFee =
+        receivingMode === 'Pick-up'
+          ? 0
+          : Math.max(0, Number(payload.shippingFee) || 0);
+
+      const totalAmount = Number(
+        (productSubtotal + designFee + shippingFee).toFixed(2),
+      );
+
+      // ── 7. Initial payment seeding ──────────────────────────────────
+      // Admin can pre-record what the walk-in customer paid at the counter.
+      const partialPayments = [];
+      let paymentStatus = 'Unpaid';
+      const initStatus = payload.initialPaymentStatus;
+
+      if (initStatus === 'Paid' && totalAmount > 0) {
+        paymentStatus = 'Paid';
+        partialPayments.push({
+          amount: totalAmount,
+          referenceNumber: null,
+          date: new Date(),
+          updatedBy: adminName,
+        });
+      } else if (initStatus === 'Partial') {
+        const amt = Number(payload.initialAmountPaid) || 0;
+        if (amt <= 0 || amt >= totalAmount) {
+          return {
+            success: false,
+            message: 'Partial amount must be greater than 0 and less than the total',
+          };
+        }
+        paymentStatus = 'Partial';
+        partialPayments.push({
+          amount: amt,
+          referenceNumber: null,
+          date: new Date(),
+          updatedBy: adminName,
+        });
+      }
+
+      // ── 8. ID + design details ──────────────────────────────────────
+      const baseId = await generateId('ORD');
+      const orderId = isProvided ? `${baseId}-PROV` : `${baseId}-COMP`;
+
+      const designDetails = processedItems.map((it) => ({
+        designSource: it.designSource || 'upload',
+        designImage: it.designImage || '',
+        printSize: it.printSize || '',
+        printPlacement: it.printPlacement || '',
+        designNotes: it.designNotes || '',
+        files: it.files || [],
+        imagePaths: (it.files || []).map((f) => f.path).filter(Boolean),
+        selectedTemplate: it.selectedTemplate || null,
+        selectedTemplateId: it.selectedTemplateId || null,
+      }));
+
+      // ── 9. Build + save the order ───────────────────────────────────
+      const newOrder = new Order({
+        orderId,
+
+        customerName,
+        customerEmail: customerEmail || '',
+        customerPhone: (payload.customerPhone || '').trim(),
+        address: (payload.address || '').trim(),
+        postalCode: payload.postalCode || '',
+        useCourier: false,
+        courierName: '',
+
+        items: processedItems,
+        designDetails,
+        hasDesign,
+        quantity: processedItems.reduce((s, i) => s + (Number(i.quantity) || 0), 0),
+
+        amount: totalAmount,
+        totalAmount,
+        designFee,
+        shippingFee,
+        downpayment: 0,
+
+        status: 'Pending',
+        paymentStatus,
+        partialPayments,
+
+        receivingMode,
+        expectedDelivery,
+        isProvided,
+
+        // Only set orderedBy when we actually found a matching account —
+        // otherwise leave it null and rely on customerEmail for the
+        // chat auto-link fallback.
+        orderedBy: customer ? customer._id.toString() : null,
+
+        notes: payload.notes || `Walk-in order created by ${adminName}`,
+        statusHistory: [
+          {
+            status: 'Pending',
+            timestamp: new Date(),
+            notes: `Walk-in order created by ${adminName}`,
+            updatedBy: adminName,
+          },
+        ],
+        customer: {
+          name: customerName,
+          email: customerEmail || '',
+          phone: (payload.customerPhone || '').trim(),
+          company: payload.customer?.company || '',
+        },
+        paymentMethod: 'cod',
+
+        createdByAdmin: true,
+        createdByAdminId: adminId,
+        createdByAdminName: adminName,
+      });
+
+      await newOrder.save();
+
+      // ── 10. Attach to the customer's orders array (if we matched) ───
+      if (customer) {
+        await Customer.findByIdAndUpdate(customer._id, {
+          $push: { orders: newOrder._id },
+        });
+      }
+
+      // ── 11. Sync Customer.totalSpent for any pre-recorded payment ───
+      const paidDelta = partialPayments.reduce(
+        (s, p) => s + (Number(p.amount) || 0),
+        0,
+      );
+      if (paidDelta > 0) {
+        await this._applyTotalSpentDelta(newOrder, paidDelta);
+      }
+
+        // ── 12. Auto-link to chat ───────────────────────────────────────
+        // Uses orderedBy OR customerEmail — works whether or not the
+        // customer has an account.
+        await this._autoLinkOrderToConversation(newOrder);
+
+      // ── 13. Realtime ────────────────────────────────────────────────
+      emitOrderChanged(newOrder, 'created');
+      emitInventoryChanged({ reason: 'walkin-order-created', orderId: newOrder.orderId });
+
+      return {
+        success: true,
+        message: 'Walk-in order created successfully',
+        data: newOrder,
+      };
+    } catch (error) {
+      console.error('Error in createWalkInOrder:', error);
+      throw error;
+    }
+  }
+
   // ─────────────────────────────────────────
   // CREATE COMPANY ORDER WITHOUT TRANSACTION (Fallback)
   // ─────────────────────────────────────────
