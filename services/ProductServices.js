@@ -737,6 +737,97 @@ async reduceStock(productId, sizeName, quantity) {
         throw error;
     }
 }
+
+  // ─────────────────────────────────────────
+  // RECORD STOCK MOVEMENT FOR A PRODUCT SIZE
+  // ─────────────────────────────────────────
+  async recordStockChange(productId, sizeName, { type, quantity, note, imageUrl, imagePublicId, user } = {}) {
+    try {
+      if (!['in', 'out'].includes(type)) {
+        return { success: false, message: 'Invalid movement type' };
+      }
+      const trimmedNote = (note || '').trim();
+      if (trimmedNote.length < 3) {
+        return {
+          success: false,
+          message: 'A reason is required for every stock adjustment (minimum 3 characters)',
+        };
+      }
+      const qty = Number(quantity);
+      if (!Number.isFinite(qty) || qty < 1) {
+        return { success: false, message: 'Quantity must be at least 1' };
+      }
+
+      const product = await Product.findOne({ id: productId });
+      if (!product) return { success: false, message: 'Product not found' };
+
+      const size = product.sizes.find((s) => s.name === sizeName);
+      if (!size) {
+        return { success: false, message: `Size "${sizeName}" not found` };
+      }
+
+      const previousStock = size.stock || 0;
+      const newStock = type === 'in'
+        ? previousStock + qty
+        : Math.max(0, previousStock - qty);
+
+      if (type === 'out' && qty > previousStock) {
+        return {
+          success: false,
+          message: `Cannot remove ${qty} — only ${previousStock} in stock`,
+        };
+      }
+
+      size.stock = newStock;
+
+      product.stockMovements.push({
+        sizeName,
+        type,
+        quantity: qty,
+        previousStock,
+        newStock,
+        note: trimmedNote,
+        imageUrl: imageUrl || '',
+        imagePublicId: imagePublicId || '',
+        performedBy: user
+          ? user.firstName
+            ? `${user.firstName} ${user.lastName || ''}`.trim()
+            : user.email || 'Admin'
+          : 'Admin',
+        performedById: user?.adminId || user?._id?.toString() || '',
+      });
+
+      product.updatedAt = new Date();
+      await product.save();
+
+      emitInventoryChanged({ reason: 'stock-movement', productId, sizeName, type });
+
+      return { success: true, message: 'Stock updated', data: product };
+    } catch (error) {
+      console.error('Error in ProductService.recordStockChange:', error);
+      throw error;
+    }
+  }
+
+  // ─────────────────────────────────────────
+  // GET MOVEMENT HISTORY FOR A PRODUCT
+  // ─────────────────────────────────────────
+  async getMovementHistory(productId, limit = 50) {
+    try {
+      const product = await Product.findOne({ id: productId })
+        .select('stockMovements name');
+      if (!product) return { success: false, message: 'Product not found' };
+
+      const movements = [...(product.stockMovements || [])]
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        .slice(0, limit);
+
+      return { success: true, data: movements };
+    } catch (error) {
+      console.error('Error in ProductService.getMovementHistory:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = new ProductService();

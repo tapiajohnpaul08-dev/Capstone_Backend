@@ -1,6 +1,22 @@
 // models/InventoryItem.Model.js
 const mongoose = require('mongoose');
 
+const stockMovementSchema = new mongoose.Schema(
+  {
+    type:          { type: String, enum: ['in', 'out'], required: true },
+    quantity:      { type: Number, required: true, min: 1 },
+    previousStock: { type: Number, required: true },
+    newStock:      { type: Number, required: true },
+    note:          { type: String, required: true, trim: true, maxlength: 500 },
+    imageUrl:      { type: String, default: '' },
+    imagePublicId: { type: String, default: '' },
+    performedBy:   { type: String, default: '' },
+    performedById: { type: String, default: '' },
+    createdAt:     { type: Date,   default: Date.now },
+  },
+  { _id: true },
+);
+
 const inventoryItemSchema = new mongoose.Schema({
     itemId: { type: String, required: true, unique: true },
     itemType: { type: String, enum: ['product', 'supply'], required: true },
@@ -18,8 +34,10 @@ const inventoryItemSchema = new mongoose.Schema({
     binLocation: { type: String, default: '' },
     batchNumber: { type: String, default: '' },
     
+    stockMovements: { type: [stockMovementSchema], default: [] },
+
     createdAt: { type: Date, default: Date.now },
-    updatedAt: { type: Date, default: Date.now }
+    updatedAt: { type: Date, default: Date.now },
 });
 
 

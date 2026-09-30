@@ -174,6 +174,29 @@ class ProductController {
         const status = response.success ? 200 : 400;
         res.status(status).json(response);
     });
+
+      // PATCH /api/v1/product/:id/size/:sizeName/movement
+  recordSizeStockMovement = asyncTryCatch(async (req, res, next) => {
+    const { id, sizeName } = req.params;
+    const { type, quantity, note, imageUrl, imagePublicId } = req.body;
+    const response = await productService.recordStockChange(id, sizeName, {
+      type,
+      quantity,
+      note,
+      imageUrl,
+      imagePublicId,
+      user: req.admin,
+    });
+    res.status(response.success ? 200 : 400).json(response);
+  });
+
+  // GET /api/v1/product/:id/movements
+  getProductMovementHistory = asyncTryCatch(async (req, res, next) => {
+    const { id } = req.params;
+    const limit = parseInt(req.query.limit) || 50;
+    const response = await productService.getMovementHistory(id, limit);
+    res.status(response.success ? 200 : 404).json(response);
+  });
 }
 
 module.exports = new ProductController();

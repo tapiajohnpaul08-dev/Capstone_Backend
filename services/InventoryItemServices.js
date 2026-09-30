@@ -346,6 +346,103 @@ async getInventoryByType(type) {
         }
     }
 
+      // ─────────────────────────────────────────
+  // RECORD STOCK MOVEMENT (audit-aware)
+  //
+  // Enforces a required note (>=3 chars) and stores an optional image
+  // attachment. Used by the admin Stock In / Stock Out flow.
+  // ─────────────────────────────────────────
+  async recordStockChange(itemId, { type, quantity, note, imageUrl, imagePublicId, user } = {}) {
+    try {
+      if (!['in', 'out'].includes(type)) {
+        return { success: false, message: 'Invalid movement type' };
+      }
+      const trimmedNote = (note || '').trim();
+      if (trimmedNote.length < 3) {
+        return {
+          success: false,
+          message: 'A reason is required for every stock adjustment (minimum 3 characters)',
+        };
+      }
+      const qty = Number(quantity);
+      if (!Number.isFinite(qty) || qty < 1) {
+        return { success: false, message: 'Quantity must be at least 1' };
+      }
+
+      const item = await InventoryItem.findOne({ itemId });
+      if (!item) return { success: false, message: 'Item not found' };
+
+      const previousStock = item.stock || 0;
+      const newStock = type === 'in'
+        ? previousStock + qty
+        : Math.max(0, previousStock - qty);
+
+      if (type === 'out' && qty > previousStock) {
+        return {
+          success: false,
+          message: `Cannot remove ${qty} — only ${previousStock} in stock`,
+        };
+      }
+
+      const threshold = item.threshold || 100;
+      const newStatus = newStock === 0
+        ? 'Out of Stock'
+        : newStock <= threshold
+          ? 'Low Stock'
+          : 'In Stock';
+
+      item.stock = newStock;
+      item.status = newStatus;
+      if (type === 'in') item.lastRestocked = new Date();
+
+      item.stockMovements.push({
+        type,
+        quantity: qty,
+        previousStock,
+        newStock,
+        note: trimmedNote,
+        imageUrl: imageUrl || '',
+        imagePublicId: imagePublicId || '',
+        performedBy: user
+          ? user.firstName
+            ? `${user.firstName} ${user.lastName || ''}`.trim()
+            : user.email || 'Admin'
+          : 'Admin',
+        performedById: user?.adminId || user?._id?.toString() || '',
+      });
+
+      item.updatedAt = new Date();
+      await item.save();
+
+      emitInventoryChanged({ reason: 'stock-movement', itemId, type });
+
+      return { success: true, message: 'Stock updated', data: item };
+    } catch (error) {
+      console.error('Error in recordStockChange:', error);
+      throw error;
+    }
+  }
+
+  // ─────────────────────────────────────────
+  // GET MOVEMENT HISTORY (paginated by limit)
+  // ─────────────────────────────────────────
+  async getMovementHistory(itemId, limit = 50) {
+    try {
+      const item = await InventoryItem.findOne({ itemId })
+        .select('stockMovements stock unit threshold name');
+      if (!item) return { success: false, message: 'Item not found' };
+
+      const movements = [...(item.stockMovements || [])]
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        .slice(0, limit);
+
+      return { success: true, data: movements };
+    } catch (error) {
+      console.error('Error in getMovementHistory:', error);
+      throw error;
+    }
+  }
+
     // ─────────────────────────────────────────
     // GET LOW STOCK ITEMS
     // ─────────────────────────────────────────

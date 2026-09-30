@@ -14,6 +14,23 @@ const sizeSchema = new mongoose.Schema({
     rimDiameter: { type: Number, default: null },
 });
 
+const productStockMovementSchema = new mongoose.Schema(
+  {
+    sizeName:      { type: String, required: true },
+    type:          { type: String, enum: ['in', 'out'], required: true },
+    quantity:      { type: Number, required: true, min: 1 },
+    previousStock: { type: Number, required: true },
+    newStock:      { type: Number, required: true },
+    note:          { type: String, required: true, trim: true, maxlength: 500 },
+    imageUrl:      { type: String, default: '' },
+    imagePublicId: { type: String, default: '' },
+    performedBy:   { type: String, default: '' },
+    performedById: { type: String, default: '' },
+    createdAt:     { type: Date,   default: Date.now },
+  },
+  { _id: true },
+);
+
 const productSchema = new mongoose.Schema({
     id: { type: String, required: true, unique: true },
     name: { type: String, required: true },
@@ -47,7 +64,8 @@ const productSchema = new mongoose.Schema({
     revenue: { type: Number, default: 0 },
     
     isActive: { type: Boolean, default: true },
-    
+    stockMovements: { type: [productStockMovementSchema], default: [] },
+
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now }
 });

@@ -11,6 +11,10 @@ router.get('/', ProductController.getAllProducts);
 router.get('/featured', ProductController.getFeaturedProducts);
 router.get('/popular', ProductController.getPopularProducts);
 router.get('/category/:category', ProductController.getProductsByCategory);
+
+router.patch('/:id/size/:sizeName/movement', verifyAdminToken, ProductController.recordSizeStockMovement);
+router.get('/:id/movements',                 verifyAdminToken, ProductController.getProductMovementHistory);
+
 router.get('/:id', ProductController.getProductById);
 router.get('/:id/sizes', ProductController.getAllSizes);
 router.get('/:id/size/:sizeName', ProductController.getSizeDetails);

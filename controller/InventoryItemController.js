@@ -82,6 +82,42 @@ class InventoryController {
         const status = response.success ? 200 : 404;
         res.status(status).json(response);
     });
+
+      // PATCH /api/v1/inventory/:itemId/movement
+  recordStockMovement = asyncTryCatch(async (req, res, next) => {
+    const { itemId } = req.params;
+    const { type, quantity, note, imageUrl, imagePublicId } = req.body;
+    const response = await inventoryService.recordStockChange(itemId, {
+      type,
+      quantity,
+      note,
+      imageUrl,
+      imagePublicId,
+      user: req.admin,
+    });
+    res.status(response.success ? 200 : 400).json(response);
+  });
+
+  // GET /api/v1/inventory/:itemId/movements
+  getMovementHistory = asyncTryCatch(async (req, res, next) => {
+    const { itemId } = req.params;
+    const limit = parseInt(req.query.limit) || 50;
+    const response = await inventoryService.getMovementHistory(itemId, limit);
+    res.status(response.success ? 200 : 404).json(response);
+  });
+
+  // POST /api/v1/inventory/upload-movement-image
+  // Reuses multer's chat storage, admin-authenticated.
+  uploadMovementImage = asyncTryCatch(async (req, res, next) => {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No file uploaded' });
+    }
+    res.json({
+      success: true,
+      url: req.file.path || req.file.url,
+      public_id: req.file.public_id || req.file.filename || null,
+    });
+  });
 }
 
 module.exports = new InventoryController();
