@@ -1,9 +1,5 @@
 const emitToAdmins = (event, payload = {}) => {
   try {
-    const rooms = global.__io__?.sockets?.adapter?.rooms;
-    const adminRoom = rooms?.get('admins');
-    const count = adminRoom ? adminRoom.size : 0;
-    console.log(`📡 [realtime] → admins | ${event} | listeners in room: ${count}`);
     if (global.__io__) global.__io__.to('admins').emit(event, payload);
   } catch (e) {
     console.error(`realtime.emitToAdmins(${event}) failed:`, e.message);
@@ -23,10 +19,7 @@ const emitToUser = (userId, event, payload = {}) => {
 const emitToMongoUser = (mongoId, event, payload = {}) => {
   try {
     if (global.__io__ && mongoId) {
-      const room = `mongo_${mongoId}`;
-      const listeners = global.__io__?.sockets?.adapter?.rooms?.get(room)?.size || 0;
-      console.log(`📡 [realtime] → ${room} | ${event} | listeners: ${listeners}`);
-      global.__io__.to(room).emit(event, payload);
+      global.__io__.to(`mongo_${mongoId}`).emit(event, payload);
     }
   } catch (e) {
     console.error(`realtime.emitToMongoUser(${event}) failed:`, e.message);

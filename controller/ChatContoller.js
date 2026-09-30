@@ -65,12 +65,21 @@ class ChatController {
       conversationId, userId, userName, userType, content, attachments || [], replyToMessageId
     );
 
-    const io = req.app.get('io');
+    const io = req.app.get('io') || global.__io__;
     if (io && response.success) {
-      io.to(`conv_${conversationId}`).emit('new-message', response.data);
-            if (userType === 'customer') {
-        io.to('admins').emit('new-message', response.data);
+      // Socket.IO's `.to()` RETURNS a new operator — must be captured.
+      let emitter = io.to(`conv_${conversationId}`);
+
+      if (userType === 'customer') {
+        emitter = emitter.to('admins');
+      } else {
+        const conv = response.conversation;
+        if (conv?.customerId) {
+          emitter = emitter.to(`user_${conv.customerId}`);
+        }
       }
+
+      emitter.emit('new-message', response.data);
     }
 
     res.status(201).json(response);

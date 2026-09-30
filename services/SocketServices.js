@@ -145,10 +145,23 @@ class SocketService {
       
       
       // ── Emit to conversation room ──
-      this.io.to(`conv_${conversationId}`).emit('new-message', messageData);
-        if (senderType === 'customer') {
-        this.io.to('admins').emit('new-message', messageData);
+
+      // ── Broadcast the message ──
+      //
+      // IMPORTANT: Socket.IO's `.to()` RETURNS a new operator instead of
+      // mutating the existing one. Calling `emitter.to('admins')` and
+      // discarding the return value would silently emit ONLY to the
+      // conv room. We must capture the returned operator.
+      let emitter = this.io.to(`conv_${conversationId}`);
+
+      if (senderType === 'customer') {
+        emitter = emitter.to('admins');
+      } else if (conversation.customerId) {
+        emitter = emitter.to(`user_${conversation.customerId}`);
       }
+
+      emitter.emit('new-message', messageData);
+
       return messageData;
     } catch (error) {
       console.error('Error saving message:', error);

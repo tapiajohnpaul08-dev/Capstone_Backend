@@ -200,7 +200,7 @@ io.on('connection', (socket) => {
   // Shared room for every connected admin — services broadcast
   // order/inventory events to `io.to('admins')` in one call.
   if (socket.userType === 'admin') socket.join('admins');
-  
+
   socket.on('join-conversation', async (data) => {
     const { conversationId } = data;
     if (!conversationId) {
