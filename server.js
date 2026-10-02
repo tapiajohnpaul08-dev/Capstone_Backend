@@ -201,6 +201,11 @@ io.on('connection', (socket) => {
   // order/inventory events to `io.to('admins')` in one call.
   if (socket.userType === 'admin') socket.join('admins');
 
+  // ✅ NEW — Shared room for every connected customer. Used by
+  // emitProductChanged so catalog create/update/delete lands in every
+  // open customer session without a page refresh.
+  if (socket.userType === 'customer') socket.join('customers');
+
   socket.on('join-conversation', async (data) => {
     const { conversationId } = data;
     if (!conversationId) {

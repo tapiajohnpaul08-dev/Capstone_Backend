@@ -10,6 +10,44 @@ const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = "24h";
 
 class CustomerService {
+
+/**
+ * Check whether a customer already exists for the given email.
+ *
+ * Returns a CONSISTENT shape so callers can always do:
+ *   const { exists } = await checkCustomerExists(email)
+ *
+ * @param {string} email
+ * @returns {Promise<{ success: boolean, exists: boolean, message?: string }>}
+ */
+async checkCustomerExists(email) {
+  // ── Guard against missing / non-string input ─────────────────────
+  if (!email || typeof email !== 'string') {
+    return { success: false, exists: false, message: 'Email is required' };
+  }
+
+  const normalized = email.trim().toLowerCase()
+  if (!normalized) {
+    return { success: false, exists: false, message: 'Email is required' };
+  }
+
+  try {
+    const existing = await Customer.findOne({ email: normalized }).select('_id')
+
+    return {
+      success: true,
+      exists: !!existing,
+      message: existing ? 'A customer with this email already exists' : '',
+    }
+  } catch (error) {
+    console.error('checkCustomerExists error:', error)
+    return {
+      success: false,
+      exists: false,
+      message: 'Unable to verify email at this time',
+    }
+  }
+}
   // ─────────────────────────────────────────
   // REGISTER
   // ─────────────────────────────────────────
@@ -24,17 +62,7 @@ class CustomerService {
         };
       }
 
-      // Verify OTP
-      const otpVerification = await verifyOtp(payload.email, otp);
-
-      if (!otpVerification.success) {
-        return {
-          success: false,
-          message: otpVerification.message,
-        };
-      }
-
-      // Check if customer already exists
+            // Check if customer already exists
       const existingCustomer = await Customer.findOne({
         $or: [
           { email: payload.email.toLowerCase() }        ],
@@ -45,6 +73,16 @@ class CustomerService {
         return {
           success: false,
           message: "A customer with this email or username already exists",
+        };
+      }
+
+      // Verify OTP
+      const otpVerification = await verifyOtp(payload.email, otp);
+
+      if (!otpVerification.success) {
+        return {
+          success: false,
+          message: otpVerification.message,
         };
       }
 

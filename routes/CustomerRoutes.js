@@ -9,9 +9,15 @@ const { authLimiter } = require('../middleware/rateLimiters');
 // ─────────────────────────────────────────
 // PUBLIC ROUTES
 // ─────────────────────────────────────────
+// ✅ NEW — cheap pre-flight for the signup form. Rate-limited like
+// the other unauthenticated email endpoints so it can't be used to
+// enumerate registered addresses at scale.
+router.post('/check-email', authLimiter, CustomerController.checkEmail);
+
 router.post('/register', authLimiter, CustomerController.register);
 router.post('/login',    authLimiter, CustomerController.login);
 router.get('/verify',    CustomerController.verifyToken);
+
 
 // ─────────────────────────────────────────
 // CUSTOMER PROTECTED ROUTES

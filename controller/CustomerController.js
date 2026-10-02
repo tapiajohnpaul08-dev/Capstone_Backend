@@ -3,6 +3,28 @@ const asyncTryCatch = require('../utils/tryAndCatch');
 
 class CustomerController {
 
+    // POST /api/v1/customer/check-email
+checkEmail = asyncTryCatch(async (req, res) => {
+  const { email } = req.body
+
+  if (!email) {
+    return res.status(400).json({
+      success: false,
+      message: 'Email is required',
+    })
+  }
+
+  const result = await customerService.checkCustomerExists(email)
+
+  // 200 with a boolean flag — this is a *check*, not an error.
+  // The client decides what to do with `exists`.
+  res.status(200).json({
+    success: result.success,
+    exists: result.exists,
+    message: result.message,
+  })
+})
+
     // POST /api/v1/customer/register
     register = asyncTryCatch(async (req, res, next) => {
         const { otp, ...customerData } = req.body;

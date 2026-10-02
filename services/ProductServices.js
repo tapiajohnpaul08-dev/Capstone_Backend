@@ -1,6 +1,6 @@
 const Product = require('../models/Product.Model');
 const generateId = require('../utils/generateItemId');
-const { emitInventoryChanged } = require('../utils/realtime');
+const { emitInventoryChanged, emitProductChanged } = require('../utils/realtime');
 const InventoryItemService = require('./InventoryItemServices');
 const { getPublicId, deleteImage, getOptimizedUrl } = require('../config/multer'); // ✅ Add this import
 
@@ -88,7 +88,9 @@ class ProductService {
         location: 'Warehouse A'
       });
 
-      emitInventoryChanged({ reason: 'product-created', productId: newProduct.id });
+      // ✅ Replaced — broadcasts to admins (inventory:changed) AND
+      // every connected customer (product:changed).
+      emitProductChanged(newProduct, 'created');
 
       return {
         success: true,
@@ -228,11 +230,12 @@ class ProductService {
         { new: true, runValidators: true }
       );
 
-      if (product) emitInventoryChanged({ reason: 'product-updated', productId: product.id });
-
       if (!product) {
         return { success: false, message: 'Product not found' };
       }
+
+      // ✅ Replaced — admins + customers.
+      emitProductChanged(product, 'updated');
 
       return {
         success: true,
@@ -269,7 +272,12 @@ class ProductService {
       }
       
       await Product.findOneAndDelete({ id });
-      emitInventoryChanged({ reason: 'product-deleted', productId: id });
+
+      // ✅ Replaced — customers receive a lightweight { action: 'deleted',
+      // productId } and filter their local list. Admins get the usual
+      // inventory:changed event via the same helper.
+      emitProductChanged({ id }, 'deleted');
+
       return { success: true, message: 'Product deleted successfully' };
     } catch (error) {
       console.error('Error deleting product:', error);
@@ -687,7 +695,12 @@ async updateSizeStock(productId, sizeName, stock) {
         product.updatedAt = new Date();
         
         await product.save();
-        emitInventoryChanged({ reason: 'stock-updated', productId, sizeName });
+
+        // ✅ Replaced — broadcasts to admins (inventory:changed) AND
+        // every connected customer (product:changed) so the customer's
+        // product grid and detail page reflect the new stock level live.
+        emitProductChanged(product, 'updated');
+
         return {
             success: true,
             message: `Stock updated for size "${sizeName}"`,
@@ -726,7 +739,10 @@ async reduceStock(productId, sizeName, quantity) {
         product.updatedAt = new Date();
         
         await product.save();
-        emitInventoryChanged({ reason: 'stock-reduced', productId, sizeName });
+
+        // ✅ Replaced — admins + customers.
+        emitProductChanged(product, 'updated');
+
         return {
             success: true,
             message: `Stock reduced by ${quantity} for size "${sizeName}"`,
@@ -800,7 +816,11 @@ async reduceStock(productId, sizeName, quantity) {
       product.updatedAt = new Date();
       await product.save();
 
-      emitInventoryChanged({ reason: 'stock-movement', productId, sizeName, type });
+      // ✅ Replaced — this is the method behind the admin's Stock In /
+      // Stock Out buttons. emitProductChanged fans out to both rooms:
+      //   • admins    → inventory:changed (existing dashboards refetch)
+      //   • customers → product:changed   (grid + detail update live)
+      emitProductChanged(product, 'updated');
 
       return { success: true, message: 'Stock updated', data: product };
     } catch (error) {

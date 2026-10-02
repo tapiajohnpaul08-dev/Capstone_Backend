@@ -90,12 +90,15 @@ router.get('/summary', verifyAdminToken, async (req, res) => {
         },
       ]),
 
-      // ── 4. Low-stock products, DB-side, no full docs ───────────
+      // ── 4. Stock alerts for product sizes — LOW and OUT OF STOCK ─
+      // Includes stock === 0 (out) and 1..500 (low). The computed
+      // `status` field lets the frontend badge the row correctly
+      // without re-deriving it.
       Product.aggregate([
         { $unwind: '$sizes' },
         {
           $match: {
-            'sizes.stock': { $gt: 0, $lte: 500 },
+            'sizes.stock': { $lte: 500 },
           },
         },
         {
@@ -106,20 +109,27 @@ router.get('/summary', verifyAdminToken, async (req, res) => {
             category: '$category',
             sizeName: '$sizes.name',
             stock: '$sizes.stock',
+            status: {
+              $cond: [
+                { $eq: ['$sizes.stock', 0] },
+                'Out of Stock',
+                'Low Stock',
+              ],
+            },
           },
         },
         { $sort: { stock: 1 } },
         { $limit: 15 },
       ]),
 
-      // ── 5. Low-stock supplies, DB-side, no full docs ───────────
+      // ── 5. Stock alerts for supplies — LOW and OUT OF STOCK ────
+      // Dropped the `stock: { $gt: 0 }` guard so out-of-stock items
+      // are included. `$expr: { $lte: ['$stock', '$threshold'] }`
+      // already covers stock === 0 (0 <= any non-negative threshold).
       InventoryItem.aggregate([
         {
           $match: {
             itemType: 'supply',
-            stock: { $gt: 0 },
-            // Compare two fields on the same document — $lte: '$threshold'
-            // cannot be done with a plain query; $expr is required.
             $expr: { $lte: ['$stock', '$threshold'] },
           },
         },
@@ -142,6 +152,13 @@ router.get('/summary', verifyAdminToken, async (req, res) => {
             stock: 1,
             threshold: { $ifNull: ['$threshold', 100] },
             unit: { $ifNull: ['$unit', 'units'] },
+            status: {
+              $cond: [
+                { $eq: ['$stock', 0] },
+                'Out of Stock',
+                'Low Stock',
+              ],
+            },
           },
         },
         { $sort: { stock: 1 } },
@@ -251,7 +268,10 @@ router.get('/summary', verifyAdminToken, async (req, res) => {
       });
     }
 
-    // ── Shape low-stock items (merged, sorted, capped at 10) ─────
+    // ── Shape stock alerts (merged, most urgent first) ───────────
+    // Status now comes from the aggregation. Sorting by `stock`
+    // ascending naturally puts every out-of-stock item (stock === 0)
+    // at the top — regardless of whether it's a product or a supply.
     const lowStockItems = [
       ...lowStockProductsAgg.map((p) => ({
         id: p.id,
@@ -259,7 +279,7 @@ router.get('/summary', verifyAdminToken, async (req, res) => {
         stock: p.stock,
         threshold: 500,
         unit: 'pcs',
-        status: 'Low Stock',
+        status: p.status,
         type: 'product',
         category: p.category,
         sizeName: p.sizeName,
@@ -270,7 +290,7 @@ router.get('/summary', verifyAdminToken, async (req, res) => {
         stock: s.stock,
         threshold: s.threshold,
         unit: s.unit,
-        status: 'Low Stock',
+        status: s.status,
         type: 'supply',
         category: s.category,
         supplier: s.supplier,
