@@ -65,15 +65,7 @@ const emitInventoryChanged = (payload = {}) => {
   });
 };
 
-// ✅ NEW — Broadcast a product catalog change.
-//
-// Fires on product create / update / delete. Admins keep receiving the
-// existing `inventory:changed` event so the dashboard is unaffected.
-// Customers receive a dedicated `product:changed` event carrying either
-// the full updated product (create/update) or just the id (delete).
-//
-// @param {object} product  Product doc OR `{ id }` for delete
-// @param {'created'|'updated'|'deleted'} action
+
 const emitProductChanged = (product, action = 'updated') => {
   if (!product) return;
 
@@ -87,11 +79,20 @@ const emitProductChanged = (product, action = 'updated') => {
     timestamp,
   });
 
-  // Customers get the dedicated event.
+
+  let slim = null;
+  if (action !== 'deleted') {
+    const raw = typeof product.toObject === 'function'
+      ? product.toObject()
+      : product;
+    const { stockMovements, ...rest } = raw;
+    slim = rest;
+  }
+
   emitToCustomers('product:changed', {
     action,
     productId,
-    product: action === 'deleted' ? null : product,
+    product: slim,
     timestamp,
   });
 };

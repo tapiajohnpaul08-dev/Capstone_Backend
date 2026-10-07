@@ -88,9 +88,7 @@ class ProductService {
         location: 'Warehouse A'
       });
 
-      // ✅ Replaced — broadcasts to admins (inventory:changed) AND
-      // every connected customer (product:changed).
-      emitProductChanged(newProduct, 'created');
+      emitProductChanged(newProduct.toObject(), 'created');
 
       return {
         success: true,
@@ -234,8 +232,7 @@ class ProductService {
         return { success: false, message: 'Product not found' };
       }
 
-      // ✅ Replaced — admins + customers.
-      emitProductChanged(product, 'updated');
+      emitProductChanged(product.toObject(), 'updated');
 
       return {
         success: true,
@@ -696,10 +693,7 @@ async updateSizeStock(productId, sizeName, stock) {
         
         await product.save();
 
-        // ✅ Replaced — broadcasts to admins (inventory:changed) AND
-        // every connected customer (product:changed) so the customer's
-        // product grid and detail page reflect the new stock level live.
-        emitProductChanged(product, 'updated');
+        emitProductChanged(product.toObject(), 'updated');
 
         return {
             success: true,
@@ -740,8 +734,7 @@ async reduceStock(productId, sizeName, quantity) {
         
         await product.save();
 
-        // ✅ Replaced — admins + customers.
-        emitProductChanged(product, 'updated');
+        emitProductChanged(product.toObject(), 'updated');
 
         return {
             success: true,
@@ -816,11 +809,8 @@ async reduceStock(productId, sizeName, quantity) {
       product.updatedAt = new Date();
       await product.save();
 
-      // ✅ Replaced — this is the method behind the admin's Stock In /
-      // Stock Out buttons. emitProductChanged fans out to both rooms:
-      //   • admins    → inventory:changed (existing dashboards refetch)
-      //   • customers → product:changed   (grid + detail update live)
-      emitProductChanged(product, 'updated');
+
+      emitProductChanged(product.toObject(), 'updated');
 
       return { success: true, message: 'Stock updated', data: product };
     } catch (error) {
