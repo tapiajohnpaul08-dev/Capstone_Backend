@@ -10,8 +10,39 @@ const generateId = require("../utils/generateItemId");
 
 const Message = require('../models/Message.Model');
 
-const { emitOrderChanged, emitInventoryChanged } = require('../utils/realtime');
+const { emitOrderChanged, emitInventoryChanged, emitProductChanged } = require('../utils/realtime');
 
+// ─────────────────────────────────────────────────────────────────
+// Broadcast product:changed for every company-product in an order.
+// Called after order create / cancel so other browsing customers
+// see stock changes without refreshing.
+//
+// Own-cups orders (isProvided === true) don't touch product stock,
+// so we skip them entirely.
+// ─────────────────────────────────────────────────────────────────
+async function broadcastAffectedProducts(order) {
+  if (!order || order.isProvided) return
+
+  const items = Array.isArray(order.items) ? order.items : []
+  const seen = new Set()
+
+  for (const item of items) {
+    if (!item.productId || seen.has(item.productId)) continue
+    seen.add(item.productId)
+
+    try {
+      const product = await Product.findOne({ id: item.productId })
+      if (product) {
+        emitProductChanged(product.toObject(), 'updated')
+      }
+    } catch (err) {
+      console.error(
+        `broadcastAffectedProducts: failed for ${item.productId}`,
+        err.message,
+      )
+    }
+  }
+}
 // ─── Constants ──────────────────────────────────────────────────────────────
 const DESIGN_AND_PRINTING_FEE = 500;
 
@@ -525,7 +556,7 @@ class OrderService {
         // ✅ Realtime — notify admins + the customer
         emitOrderChanged(newOrder, 'created');
         emitInventoryChanged({ reason: 'order-created', orderId: newOrder.orderId });
-
+        
         return { success: true, message: "Order created successfully", data: newOrder };
       }
 
@@ -682,6 +713,10 @@ class OrderService {
           await this._autoLinkOrderToConversation(newOrder);
           emitOrderChanged(newOrder, 'created');
           emitInventoryChanged({ reason: 'order-created', orderId: newOrder.orderId });
+
+          // ✅ Push product:changed to every connected customer so their
+          // browsing grid reflects the new stock levels immediately.
+          await broadcastAffectedProducts(newOrder);
         }
       } catch (txnErr) {
         if (txnErr.handled) {
@@ -1064,6 +1099,10 @@ class OrderService {
       emitOrderChanged(newOrder, 'created');
       emitInventoryChanged({ reason: 'walkin-order-created', orderId: newOrder.orderId });
 
+      // ✅ Push product:changed so browsing customers see the stock
+      // deduction in real time (walk-in orders deduct stock at creation).
+      await broadcastAffectedProducts(newOrder);
+
       return {
         success: true,
         message: 'Walk-in order created successfully',
@@ -1208,6 +1247,10 @@ if (
     await this._autoLinkOrderToConversation(newOrder);
     emitOrderChanged(newOrder, 'created');
     emitInventoryChanged({ reason: 'order-created', orderId: newOrder.orderId });
+
+    // ✅ Broadcast product stock changes to all connected customers.
+    await broadcastAffectedProducts(newOrder);
+
     return { success: true, message: "Order created successfully", data: newOrder };
   }
 
@@ -1401,6 +1444,9 @@ if (
               const restored = updatedProduct.sizes.find(
                 (s) => s.name === item.size,
               );
+
+              // ✅ Notify every connected customer that stock came back.
+              emitProductChanged(updatedProduct.toObject(), 'updated');
             } else {
               console.warn(
                 `⚠️ Cannot restore — product ${item.productId} / size ${item.size} not found`,
